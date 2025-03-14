@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Owner Dashboard</title>
+</head>
+<body>
+  <h1>Hello, <%= ownerName %>!</h1>
+  <h2>Welcome to your dashboard.</h2>
+
+  <!-- Display buses -->
+  <h3>Buses:</h3>
+  <ul>
+    <% if (buses && buses.length > 0) { %>
+      <% buses.forEach(bus => { %>
+        <li><%= bus.bus_name %></li>
+      <% }); %>
+    <% } else { %>
+      <p>No buses available.</p>
+    <% } %>
+  </ul>
+
+  <!-- Display drivers -->
+  <h3>Drivers:</h3>
+  <ul>
+    <% if (drivers && drivers.length > 0) { %>
+      <% drivers.forEach(driver => { %>
+        <li><%= driver.driver_name %></li>
+      <% }); %>
+    <% } else { %>
+      <p>No drivers available.</p>
+    <% } %>
+  </ul>
+</body>
+</html>
