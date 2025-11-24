@@ -1,13 +1,23 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
 const LS_USER_KEY = "auth_user";
 const LS_USERS_KEY = "users_db"; // array of {id,name,email,phone,password}
+const LS_TOKEN_KEY = "auth_token";
 
-// 👉 OWNER EMAIL(S) – Rim only
-const OWNER_EMAILS = ["rim@utopiabyrim.com"]; // add more owner emails if ever needed
+// 👉 Backend API base
+const API_BASE = "http://localhost:3001/api";
+
+// 👉 OWNER EMAIL(S)
+const OWNER_EMAILS = ["owner@utopiabyrim.com"]; // backend owner user
 
 function getRoleByEmail(email) {
   const e = (email || "").trim().toLowerCase();
@@ -43,30 +53,18 @@ function writeMe(u) {
 }
 function clearMe() {
   localStorage.removeItem(LS_USER_KEY);
+  localStorage.removeItem(LS_TOKEN_KEY);
 }
 
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(readMe());
 
   useEffect(() => {
-    // Seed Rim (owner) + demo user into local "DB"
+    // Seed demo user into local "DB" (owner now lives in backend)
     const db = readUsers();
     let changed = false;
 
-    // 1) Ensure Rim admin exists
-    const rimEmail = "rim@utopiabyrim.com";
-    if (!db.some((u) => u.email.toLowerCase() === rimEmail.toLowerCase())) {
-      db.push({
-        id: "u_owner_rim",
-        name: "Rim (Owner)",
-        email: rimEmail,
-        phone: "+96170000000",
-        password: "Rim2024", // 🔐 ADMIN PASSWORD
-      });
-      changed = true;
-    }
-
-    // 2) Ensure demo user exists (optional, for testing)
+    // Demo user (for testing customer flow)
     const demoEmail = "demo@utopia.com";
     if (!db.some((u) => u.email.toLowerCase() === demoEmail.toLowerCase())) {
       db.push({
@@ -90,11 +88,43 @@ export default function AuthProvider({ children }) {
 
       // ---------- LOGIN ----------
       login: async (email, password) => {
+        const emailNorm = email.trim().toLowerCase();
+
+        // 1) OWNER LOGIN → use backend NestJS + Supabase
+        if (OWNER_EMAILS.includes(emailNorm)) {
+          const res = await fetch(`${API_BASE}/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          if (!res.ok) {
+            throw new Error("Invalid email or password.");
+          }
+
+          const data = await res.json();
+
+          // Save backend token
+          localStorage.setItem(LS_TOKEN_KEY, data.token);
+
+          const me = {
+            id: data.user.id,
+            name: data.user.name || "Utopia Owner",
+            email: data.user.email,
+            phone: "", // you can add phone later from backend
+            role: getRoleByEmail(data.user.email),
+          };
+
+          writeMe(me);
+          setUser(me);
+          return;
+        }
+
+        // 2) CUSTOMER / DEMO LOGIN → still local "users_db"
         const db = readUsers();
         const u = db.find(
           (x) =>
-            x.email.toLowerCase() === email.toLowerCase() &&
-            x.password === password
+            x.email.toLowerCase() === emailNorm && x.password === password
         );
         if (!u) throw new Error("Invalid email or password.");
 
@@ -110,7 +140,7 @@ export default function AuthProvider({ children }) {
         setUser(me);
       },
 
-      // ---------- REGISTER ----------
+      // ---------- REGISTER (local only, for customers/demo) ----------
       register: async ({ name, email, phone, password }) => {
         const db = readUsers();
         if (db.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
@@ -157,7 +187,7 @@ export default function AuthProvider({ children }) {
         });
       },
 
-      // ---------- RESET PASSWORD FLOW ----------
+      // ---------- RESET PASSWORD FLOW (local only) ----------
       startResetFlow: (email) => {
         const token = Math.random().toString(36).slice(2, 8).toUpperCase();
         localStorage.setItem(

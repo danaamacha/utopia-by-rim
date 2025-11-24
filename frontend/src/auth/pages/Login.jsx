@@ -5,8 +5,11 @@ import { useAuth } from "../../auth/AuthContext";
 
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("demo@utopia.com"); // demo user
-  const [password, setPassword] = useState("123456");
+
+  // 🔹 Default to OWNER creds for quick backend testing
+  const [email, setEmail] = useState("owner@utopiabyrim.com");
+  const [password, setPassword] = useState("owner123");
+
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -20,11 +23,17 @@ export default function Login() {
     setLoading(true);
 
     try {
+      const emailNorm = email.trim().toLowerCase();
+
       await login(email, password);
 
-      // ✅ NO MORE special redirect for Rim here
-      // Just go back where user came from (or home)
-      nav(from, { replace: true });
+      // 🔹 If it's the owner → go to admin dashboard
+      if (emailNorm === "owner@utopiabyrim.com") {
+        nav("/admin", { replace: true });
+      } else {
+        // customers / demo → go back where they came from
+        nav(from, { replace: true });
+      }
     } catch (e2) {
       setErr(e2.message || "Login failed");
     } finally {
@@ -63,9 +72,11 @@ export default function Login() {
 
         {/* Small hint for you while developing */}
         <p style={{ marginTop: 10, fontSize: 12, color: "#a38fb5" }}>
-          Demo login: <strong>demo@utopia.com</strong> / <strong>123456</strong>  
+          <strong>Owner (Admin, backend):</strong>{" "}
+          <code>owner@utopiabyrim.com</code> / <code>owner123</code>
           <br />
-          Owner login (Rim): <strong>rim@utopiabyrim.com</strong> / <strong>123456</strong>
+          <strong>Demo customer (local only):</strong>{" "}
+          <code>demo@utopia.com</code> / <code>123456</code>
         </p>
 
         <form
