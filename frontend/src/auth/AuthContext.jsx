@@ -14,7 +14,10 @@ const LS_USERS_KEY = "users_db"; // array of {id,name,email,phone,password}
 const LS_TOKEN_KEY = "auth_token";
 
 // 👉 Backend API base
-const API_BASE = "http://localhost:3001/api";
+// const API_BASE = "http://localhost:3001/api";
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "http://localhost:3001/api";
+
 
 // 👉 OWNER EMAIL(S)
 const OWNER_EMAILS = ["owner@utopiabyrim.com"]; // backend owner user
