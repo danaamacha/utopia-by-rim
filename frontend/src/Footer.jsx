@@ -93,7 +93,7 @@ export default function Footer() {
           <p style={{ margin: "4px 0", color: "#f2e7f5" }}>
             💬{" "}
             <a
-              href="https://wa.me/96170000000"
+              href="https://wa.me/96181453250"
               target="_blank"
               rel="noreferrer"
               style={{ color: "#fff" }}

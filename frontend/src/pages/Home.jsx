@@ -1,11 +1,32 @@
 // frontend/src/pages/Home.jsx
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { colors, radii, shadows } from "../theme";
 import ServiceArchCard from "../components/ServiceArchCard";
 import BestSellerCard from "../components/BestSellerCard";
 import useBreakpoint from "../hooks/useBreakpoint";
 import AboutSection from "../pages/About";
 import ContactSection from "../pages/ContactSection";
+import { addToCart } from "../api/cart";
+import { useAuth } from "../auth/AuthContext";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+const PAGES_API = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
+
+function resolveImageUrl(url) {
+  if (!url) return "/best/best1.jpg";
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/uploads/")) return `${API_BASE}${url}`;
+  return url;
+}
+
+// ─── DEFAULT hero content (shown while loading or if API fails) ───────────────
+const DEFAULT_HOME = {
+  heroTitle: "Handmade resin art for your dream space.",
+  heroSubtitle: "Unique, custom-made pieces crafted with love in Lebanon.",
+  heroTagline: "",
+  heroButtonLabel: "Shop Now",
+};
 
 function ServicesElegant() {
   const bp = useBreakpoint();
@@ -13,7 +34,7 @@ function ServicesElegant() {
 
   return (
     <section
-      id="services"  // ✅ This line makes scroll-to-section work
+      id="services"
       style={{
         background: "#9a8ba0",
         padding: bp.xs || bp.sm ? "40px 16px 56px" : "60px 20px 80px",
@@ -71,12 +92,45 @@ function ServicesElegant() {
 function BestSellers() {
   const bp = useBreakpoint();
   const cols = bp.xs ? 1 : bp.sm ? 2 : 3;
+  const [items, setItems] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
 
-  const items = [
-    { image: "/best/best1.jpg", name: "Agate Clock", price: 56 },
-    { image: "/best/best3.jpg", name: "Ocean Table", price: 42000 },
-    { image: "/best/best5.jpg", name: "Forest Coasters", price: 42000 },
-  ];
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  const handleAdd = async (product) => {
+    if (!isAuthenticated) {
+      alert("Please login first");
+      navigate("/login");
+      return;
+    }
+    try {
+      await addToCart(product.id, 1);
+      alert("Added to cart!");
+      window.navigator.vibrate?.(10);
+    } catch (err) {
+      console.error("Failed to add to cart:", err);
+      alert(err?.message || "Failed to add to cart");
+    }
+  };
+
+  React.useEffect(() => {
+    async function fetchBestSellers() {
+      try {
+        setLoading(true);
+        const { getBestSellers } = await import("../api/products");
+        const res = await getBestSellers({ limit: 6 });
+        const list = Array.isArray(res) ? res : res?.data ?? [];
+        setItems(list);
+      } catch (error) {
+        console.error("Failed to load best sellers:", error);
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchBestSellers();
+  }, []);
 
   return (
     <section style={{ background: "#8d7f96", padding: "48px 20px 70px" }}>
@@ -107,16 +161,37 @@ function BestSellers() {
             padding: bp.xs ? 14 : 24,
           }}
         >
-          <div
-            style={{
-              display: "grid",
-              gap: 18,
-              gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            }}
-          >
-            {items.map((p) => (
-              <BestSellerCard key={p.name} {...p} />
-            ))}
+          <div style={{ display: "grid", gap: 18, gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+            {loading ? (
+              <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "40px", color: "#fff" }}>
+                Loading best sellers...
+              </div>
+            ) : items.length === 0 ? (
+              <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "40px", color: "#fff" }}>
+                No best sellers available
+              </div>
+            ) : (
+              items.map((p) => {
+                const primary = p.images?.find((img) => img.isPrimary) || p.images?.[0];
+                const item = {
+                  id: p.id,
+                  name: p.name,
+                  price: Number(p.price),
+                  slug: p.slug,
+                  image: resolveImageUrl(primary?.url),
+                };
+                return (
+                  <BestSellerCard
+                    key={p.id}
+                    image={item.image}
+                    name={item.name}
+                    price={item.price}
+                    slug={item.slug}
+                    onAdd={() => handleAdd(item)}
+                  />
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -124,16 +199,27 @@ function BestSellers() {
   );
 }
 
+// ─── MAIN HOME COMPONENT ──────────────────────────────────────────────────────
 export default function Home() {
   const gold = "#d4af37";
+  const [hero, setHero] = React.useState(DEFAULT_HOME);
+
+  // Fetch home page content from CMS
+  React.useEffect(() => {
+    fetch(`${PAGES_API}/pages/home`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((data) => setHero({ ...DEFAULT_HOME, ...data }))
+      .catch(() => {
+        // silently fall back to defaults — page still works
+      });
+  }, []);
 
   return (
     <main>
       {/* HERO */}
       <section
         style={{
-          background:
-            `linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.35)), url(/hero.jpeg) center/cover no-repeat`,
+          background: `linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.35)), url(/hero.jpeg) center/cover no-repeat`,
           minHeight: "88vh",
           display: "grid",
           placeItems: "center",
@@ -157,18 +243,55 @@ export default function Home() {
             utopia— byRim!
           </h1>
 
+          {/* ── CMS-driven content ── */}
+          {hero.heroTitle && (
+            <p
+              style={{
+                marginTop: 12,
+                fontSize: 22,
+                color: "#f5e6c8",
+                fontWeight: 600,
+                textShadow: "0 1px 8px rgba(0,0,0,.35)",
+              }}
+            >
+              {hero.heroTitle}
+            </p>
+          )}
+
           <p
             style={{
-              marginTop: 16,
-              fontSize: 20,
+              marginTop: 8,
+              fontSize: 18,
               color: "#f5e6c8",
               textShadow: "0 1px 8px rgba(0,0,0,.35)",
             }}
           >
-            Handcrafted Resin Elegance — Made with Heart, Designed to Shine.
+            {hero.heroSubtitle || "Handcrafted Resin Elegance — Made with Heart, Designed to Shine."}
           </p>
 
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 22 }}>
+          {hero.heroTagline && (
+            <p
+              style={{
+                marginTop: 6,
+                fontSize: 14,
+                color: "#fde8a0",
+                fontStyle: "italic",
+                textShadow: "0 1px 6px rgba(0,0,0,.3)",
+              }}
+            >
+              {hero.heroTagline}
+            </p>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              justifyContent: "center",
+              marginTop: 22,
+              flexWrap: "wrap",
+            }}
+          >
             <a
               href="/shop"
               style={{
@@ -180,7 +303,7 @@ export default function Home() {
                 boxShadow: shadows.subtle,
               }}
             >
-              Shop Now
+              {hero.heroButtonLabel || "Shop Now"}
             </a>
             <a
               href="/about"
@@ -200,16 +323,9 @@ export default function Home() {
         </div>
       </section>
 
-      {/* OUR SERVICES */}
       <ServicesElegant />
-
-      {/* BEST SELLERS */}
       <BestSellers />
-
-      {/* ABOUT */}
       <AboutSection />
-
-      {/* CONTACT */}
       <ContactSection />
     </main>
   );

@@ -1,7 +1,18 @@
 // frontend/src/sections/ContactSection.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import useBreakpoint from "../hooks/useBreakpoint";
-import { colors, radii, shadows } from "../theme";
+import { shadows } from "../theme";
+
+const PAGES_API = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
+
+const DEFAULT_CONTACT = {
+  title: "Contact",
+  email: "hello@utopiabyrim.com",
+  phone: "+961 70 000 000",
+  whatsapp: "+961 70 000 000",
+  address: "Beirut, Lebanon",
+  note: "",
+};
 
 function Field({ label, children }) {
   return (
@@ -16,10 +27,20 @@ function Field({ label, children }) {
 
 export default function ContactSection() {
   const bp = useBreakpoint();
+  const gold = "#d4af37";
 
-  const [form, setForm] = useState({ name: "", email: "", message: "" });
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
+  const [contact, setContact] = useState(DEFAULT_CONTACT);
+  const [form, setForm]       = useState({ name: "", email: "", message: "" });
+  const [sent, setSent]       = useState(false);
+  const [error, setError]     = useState("");
+
+  // ─── Fetch CMS contact content ────────────────────────────────────────────
+  useEffect(() => {
+    fetch(`${PAGES_API}/pages/contact`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((data) => setContact({ ...DEFAULT_CONTACT, ...data }))
+      .catch(() => {}); // silently fall back to defaults
+  }, []);
 
   function validateEmail(v) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -36,11 +57,29 @@ export default function ContactSection() {
       setError("Please enter a valid email address.");
       return;
     }
-    // You can integrate real backend later (NestJS). For now, show success state.
     setSent(true);
   }
 
-  const gold = "#d4af37";
+  // Build WhatsApp href from the stored number
+  const waNumber = (contact.whatsapp || contact.phone || "")
+    .replace(/\D/g, ""); // strip non-digits
+  const waHref = waNumber ? `https://wa.me/${waNumber}` : "#";
+
+  const emailHref = contact.email ? `mailto:${contact.email}` : "#";
+
+  const inputStyle = {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid #d9cfe1",
+    outline: "none",
+    fontSize: 15,
+    transition: "border-color .2s ease, box-shadow .2s ease",
+    boxSizing: "border-box",
+  };
+
+  const focusIn  = (e) => { e.currentTarget.style.border = `1px solid ${gold}`; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(212,175,55,.18)"; };
+  const focusOut = (e) => { e.currentTarget.style.border = "1px solid #d9cfe1";  e.currentTarget.style.boxShadow = "none"; };
 
   return (
     <section
@@ -51,6 +90,7 @@ export default function ContactSection() {
       }}
     >
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+
         {/* Title */}
         <h2
           style={{
@@ -67,10 +107,10 @@ export default function ContactSection() {
             animation: "shine 4s linear infinite",
           }}
         >
-          Contact us
+          {contact.title || "Contact us"}
         </h2>
 
-        {/* Grid: left info / right form */}
+        {/* Grid */}
         <div
           style={{
             display: "grid",
@@ -79,14 +119,14 @@ export default function ContactSection() {
             marginTop: 26,
           }}
         >
-          {/* Left: contact info card */}
+          {/* Left: contact info */}
           <div
             style={{
               background: "#c1a7cc",
               borderRadius: 20,
               padding: bp.xs ? 18 : 28,
               boxShadow: shadows.subtle,
-              border: `1px solid rgba(212,175,55,.35)`,
+              border: "1px solid rgba(212,175,55,.35)",
             }}
           >
             <h3
@@ -98,107 +138,96 @@ export default function ContactSection() {
                 textAlign: "center",
               }}
             >
-              We’d love to hear from you
+              We'd love to hear from you
             </h3>
 
-            <p
-              style={{
-                margin: 0,
-                color: "#4b3355",
-                lineHeight: 1.7,
-                textAlign: "center",
-              }}
-            >
+            <p style={{ margin: 0, color: "#4b3355", lineHeight: 1.7, textAlign: "center" }}>
               Custom orders, wholesale inquiries, or a simple hello —
               just reach out. We answer within 24 hours.
             </p>
 
-            <div
-              style={{
-                marginTop: 16,
-                display: "grid",
-                gap: 12,
-              }}
-            >
+            {contact.note ? (
+              <p style={{ margin: "10px 0 0", color: "#4b3355", lineHeight: 1.6, textAlign: "center", fontSize: 13 }}>
+                {contact.note}
+              </p>
+            ) : null}
+
+            <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+
               {/* Email */}
-              <a
-                href="mailto:hello@utopiabyrim.com"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  background: "#ecdff2",
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  textDecoration: "none",
-                  color: "#3d264b",
-                  fontWeight: 600,
-                  border: `1px solid rgba(212,175,55,.35)`,
-                }}
-              >
-                <span aria-hidden>✉️</span> hello@utopiabyrim.com
-              </a>
+              {contact.email && (
+                <a
+                  href={emailHref}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    background: "#ecdff2", padding: "12px 14px", borderRadius: 14,
+                    textDecoration: "none", color: "#3d264b", fontWeight: 600,
+                    border: "1px solid rgba(212,175,55,.35)",
+                  }}
+                >
+                  <span aria-hidden>✉️</span> {contact.email}
+                </a>
+              )}
+
+              {/* Phone */}
+              {contact.phone && (
+                <a
+                  href={`tel:${contact.phone.replace(/\s/g, "")}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    background: "#ecdff2", padding: "12px 14px", borderRadius: 14,
+                    textDecoration: "none", color: "#3d264b", fontWeight: 600,
+                    border: "1px solid rgba(212,175,55,.35)",
+                  }}
+                >
+                  <span aria-hidden>📞</span> {contact.phone}
+                </a>
+              )}
 
               {/* WhatsApp */}
-              <a
-                href="https://wa.me/96170000000" // TODO: put your real phone (international format)
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  background: "#ecdff2",
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  textDecoration: "none",
-                  color: "#3d264b",
-                  fontWeight: 600,
-                  border: `1px solid rgba(212,175,55,.35)`,
-                }}
-              >
-                <span aria-hidden>💬</span> WhatsApp us
-              </a>
+              {contact.whatsapp && (
+                <a
+                  href={waHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    background: "#ecdff2", padding: "12px 14px", borderRadius: 14,
+                    textDecoration: "none", color: "#3d264b", fontWeight: 600,
+                    border: "1px solid rgba(212,175,55,.35)",
+                  }}
+                >
+                  <span aria-hidden>💬</span> WhatsApp: {contact.whatsapp}
+                </a>
+              )}
 
-              {/* Instagram */}
+              {/* Instagram placeholder */}
               <a
-                href="https://instagram.com/utopia_by_rim" // TODO: put your real IG
+                href="https://instagram.com/utopia_by_rim"
                 target="_blank"
                 rel="noreferrer"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  background: "#ecdff2",
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  textDecoration: "none",
-                  color: "#3d264b",
-                  fontWeight: 600,
-                  border: `1px solid rgba(212,175,55,.35)`,
+                  display: "flex", alignItems: "center", gap: 12,
+                  background: "#ecdff2", padding: "12px 14px", borderRadius: 14,
+                  textDecoration: "none", color: "#3d264b", fontWeight: 600,
+                  border: "1px solid rgba(212,175,55,.35)",
                 }}
               >
                 <span aria-hidden>📷</span> @utopia_by_rim
               </a>
             </div>
 
-            {/* Optional map teaser */}
+            {/* Address */}
             <div
               style={{
-                marginTop: 18,
-                borderRadius: 16,
-                overflow: "hidden",
-                border: `1px solid rgba(212,175,55,.35)`,
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.3))",
-                height: 160,
-                display: "grid",
-                placeItems: "center",
-                color: "#4b3355",
-                fontWeight: 600,
+                marginTop: 18, borderRadius: 16, overflow: "hidden",
+                border: "1px solid rgba(212,175,55,.35)",
+                background: "linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.3))",
+                height: 80, display: "grid", placeItems: "center",
+                color: "#4b3355", fontWeight: 600,
               }}
             >
-              Beirut, Lebanon
+              {contact.address || "Beirut, Lebanon"}
             </div>
           </div>
 
@@ -206,22 +235,12 @@ export default function ContactSection() {
           <form
             onSubmit={onSubmit}
             style={{
-              background: "#fff",
-              borderRadius: 20,
-              padding: bp.xs ? 18 : 28,
-              border: `1px solid rgba(212,175,55,.35)`,
-              boxShadow: shadows.subtle,
+              background: "#fff", borderRadius: 20, padding: bp.xs ? 18 : 28,
+              border: "1px solid rgba(212,175,55,.35)", boxShadow: shadows.subtle,
             }}
           >
             {sent ? (
-              <div
-                style={{
-                  textAlign: "center",
-                  color: "#3d264b",
-                  fontWeight: 700,
-                  padding: "20px 8px",
-                }}
-              >
+              <div style={{ textAlign: "center", color: "#3d264b", fontWeight: 700, padding: "20px 8px" }}>
                 🎉 Thank you! Your message has been sent.
               </div>
             ) : (
@@ -233,23 +252,9 @@ export default function ContactSection() {
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                     placeholder="Rim / Dana"
                     required
-                    style={{
-                      width: "100%",
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      border: "1px solid #d9cfe1",
-                      outline: "none",
-                      fontSize: 15,
-                      transition: "border-color .2s ease, box-shadow .2s ease",
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.border = `1px solid ${gold}`;
-                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(212,175,55,.18)";
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.border = "1px solid #d9cfe1";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
+                    style={inputStyle}
+                    onFocus={focusIn}
+                    onBlur={focusOut}
                   />
                 </Field>
 
@@ -260,23 +265,9 @@ export default function ContactSection() {
                     onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                     placeholder="you@example.com"
                     required
-                    style={{
-                      width: "100%",
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      border: "1px solid #d9cfe1",
-                      outline: "none",
-                      fontSize: 15,
-                      transition: "border-color .2s ease, box-shadow .2s ease",
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.border = `1px solid ${gold}`;
-                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(212,175,55,.18)";
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.border = "1px solid #d9cfe1";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
+                    style={inputStyle}
+                    onFocus={focusIn}
+                    onBlur={focusOut}
                   />
                 </Field>
 
@@ -287,24 +278,9 @@ export default function ContactSection() {
                     onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
                     placeholder="Tell us about your custom idea…"
                     required
-                    style={{
-                      width: "100%",
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      border: "1px solid #d9cfe1",
-                      outline: "none",
-                      fontSize: 15,
-                      resize: "vertical",
-                      transition: "border-color .2s ease, box-shadow .2s ease",
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.style.border = `1px solid ${gold}`;
-                      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(212,175,55,.18)";
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.border = "1px solid #d9cfe1";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
+                    style={{ ...inputStyle, resize: "vertical" }}
+                    onFocus={focusIn}
+                    onBlur={focusOut}
                   />
                 </Field>
 
@@ -315,15 +291,10 @@ export default function ContactSection() {
                 <button
                   type="submit"
                   style={{
-                    marginTop: 14,
-                    width: "100%",
+                    marginTop: 14, width: "100%",
                     background: "linear-gradient(90deg, #d4af37, #f6d77e)",
-                    color: "#fff",
-                    border: "none",
-                    padding: "12px 18px",
-                    borderRadius: 14,
-                    fontWeight: 700,
-                    cursor: "pointer",
+                    color: "#fff", border: "none", padding: "12px 18px",
+                    borderRadius: 14, fontWeight: 700, cursor: "pointer",
                     boxShadow: "0 6px 18px rgba(212,175,55,.28)",
                     transition: "transform .2s ease, opacity .2s ease",
                   }}

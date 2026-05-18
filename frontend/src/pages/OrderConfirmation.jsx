@@ -62,6 +62,8 @@ export default function OrderConfirmation() {
 
   const items = st.items || (lastOrder && lastOrder.items) || [];
   const email = st.email || (lastOrder && lastOrder.email) || "";
+  const notification =
+    st.notification || (lastOrder && lastOrder.notification) || null;
   const shipping = st.shipping || (lastOrder && lastOrder.shipping) || "standard";
   const shippingCost = shipping === "express" ? 12 : 6;
 
@@ -152,8 +154,18 @@ export default function OrderConfirmation() {
         <div>
           <h1 style={{ margin: 0, fontSize: isMobile ? 24 : 36, lineHeight: 1.15 }}>Thank you for your order!</h1>
           <div style={{ marginTop: 6, opacity: .95, fontSize: isMobile ? 12.5 : 14.5 }}>
-            We’ve sent a confirmation to <strong>{maskEmail(email)}</strong>
+            We've sent a confirmation to <strong>{maskEmail(email)}</strong>
           </div>
+          {notification?.emailSent === true && (
+            <div style={{ marginTop: 8, fontSize: isMobile ? 12.5 : 14.5, color: "#e8f5e9" }}>
+              Confirmation email sent.
+            </div>
+          )}
+          {notification && notification.emailSent === false && (
+            <div style={{ marginTop: 8, fontSize: isMobile ? 12.5 : 14.5, color: "#ffecb3" }}>
+              We could not send the confirmation email. Please check your spam folder or contact support.
+            </div>
+          )}
         </div>
       </section>
 

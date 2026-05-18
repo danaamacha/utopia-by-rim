@@ -3,44 +3,92 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useBreakpoint from "../../hooks/useBreakpoint";
 import {
-  readAdminState,
-  writeAdminState,
-  buildMergedProducts,
+  adminDeleteProduct,
+  adminGetProducts,
+  resolveAdminImageUrl,
 } from "./adminProductsUtils";
+
+// ✅ Pick main image from backend images[] (primary first)
+function pickMainImageFromImages(p) {
+  const imgs = Array.isArray(p?.images) ? p.images : [];
+  const primary = imgs.find((i) => i?.isPrimary && i?.url);
+  return primary?.url || imgs[0]?.url || "";
+}
+
+// ✅ Get category name from backend categories[]
+function pickCategoryName(p) {
+  const cats = Array.isArray(p?.categories) ? p.categories : [];
+  // prefer name, fallback to slug
+  return cats[0]?.name || cats[0]?.slug || "";
+}
 
 export default function AdminProductList() {
   const bp = useBreakpoint();
   const isMobile = bp.xs || bp.sm;
   const nav = useNavigate();
 
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [products, setProducts] = useState([]);
+
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("all"); // all | specific cat
+  const [category, setCategory] = useState("all");
   const [status, setStatus] = useState("all"); // all | instock | soldout
-  const [adminState, setAdminState] = useState({});
+
+  const [imgFail, setImgFail] = useState({});
+
+  const load = async () => {
+    try {
+      setErr("");
+      setLoading(true);
+
+      const list = await adminGetProducts();
+
+      const normalized = (list || []).map((p) => {
+        const rawImg = pickMainImageFromImages(p); // ✅ correct source
+        const catName = pickCategoryName(p);       // ✅ correct source
+
+        return {
+          id: p.id,
+          name: p.name ?? "",
+          cat: catName,
+          price: p.price ?? 0,
+          salePrice: p.salePrice ?? null,
+          image: rawImg,
+          short: p.shortDescription ?? p.short ?? p.description ?? "",
+          soldOut: !!(p.soldOut ?? false),
+          stock: p.stock ?? p.stockQuantity ?? null,
+        };
+      });
+
+      setProducts(normalized);
+      setImgFail({});
+    } catch (e) {
+      setErr(e?.message || "Failed to load products.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setAdminState(readAdminState());
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const mergedProducts = useMemo(
-    () => buildMergedProducts(adminState),
-    [adminState]
-  );
 
   const categories = useMemo(() => {
     const set = new Set();
-    mergedProducts.forEach((p) => p.cat && set.add(p.cat));
+    products.forEach((p) => p.cat && set.add(p.cat));
     return Array.from(set);
-  }, [mergedProducts]);
+  }, [products]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return mergedProducts.filter((p) => {
+    return products.filter((p) => {
       const matchText =
         !q ||
-        p.name.toLowerCase().includes(q) ||
-        (p.short && p.short.toLowerCase().includes(q));
+        (p.name || "").toLowerCase().includes(q) ||
+        (p.short || "").toLowerCase().includes(q);
 
       const matchCat = category === "all" || p.cat === category;
 
@@ -50,38 +98,21 @@ export default function AdminProductList() {
 
       return matchText && matchCat && matchStatus;
     });
-  }, [mergedProducts, search, category, status]);
+  }, [products, search, category, status]);
 
-  const totalCount = mergedProducts.length;
-
-  const updateAdmin = (mutator) => {
-    setAdminState((prev) => {
-      const next = mutator({ ...prev });
-      writeAdminState(next);
-      return next;
-    });
-  };
-
-  const handleToggleSoldOut = (id) => {
-    updateAdmin((state) => {
-      const current = state[id] || {};
-      state[id] = { ...current, soldOut: !current.soldOut };
-      return state;
-    });
-  };
-
-  const handleDelete = (id, name) => {
-    const ok = window.confirm(
-      `Are you sure you want to delete “${name}” from your admin list?\n(This is a soft delete only in this demo.)`
-    );
+  const handleDelete = async (id, name) => {
+    const ok = window.confirm(`Delete “${name}”?\nThis will remove it from the database.`);
     if (!ok) return;
 
-    updateAdmin((state) => {
-      const current = state[id] || {};
-      state[id] = { ...current, deleted: true };
-      return state;
-    });
+    try {
+      await adminDeleteProduct(id);
+      await load();
+    } catch (e) {
+      alert(e?.message || "Failed to delete product.");
+    }
   };
+
+  const totalCount = products.length;
 
   return (
     <main
@@ -105,71 +136,76 @@ export default function AdminProductList() {
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: isMobile ? 18 : 20,
-                color: "#3c274f",
-                wordBreak: "break-word",
-              }}
-            >
+            <h1 style={{ margin: 0, fontSize: isMobile ? 18 : 20, color: "#3c274f" }}>
               Products
             </h1>
-            <p
-              style={{
-                marginTop: 6,
-                fontSize: isMobile ? 11.5 : 13,
-                color: "#7a6989",
-              }}
-            >
+            <p style={{ marginTop: 6, fontSize: isMobile ? 11.5 : 13, color: "#7a6989" }}>
               Manage your resin pieces, categories, stock and sale status.
             </p>
-            <p
-              style={{
-                marginTop: 2,
-                fontSize: isMobile ? 10 : 11,
-                color: "#a38fb5",
-              }}
-            >
+            <p style={{ marginTop: 2, fontSize: isMobile ? 10 : 11, color: "#a38fb5" }}>
               Showing {filtered.length} of {totalCount} products.
             </p>
           </div>
 
-          <button
-            type="button"
-            style={{
-              padding: isMobile ? "7px 12px" : "8px 14px",
-              borderRadius: 999,
-              border: "none",
-              background: "linear-gradient(90deg, #7c51a1, #4a2a73)",
-              fontSize: isMobile ? 11.5 : 12,
-              cursor: "pointer",
-              color: "#fff",
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-            }}
-            onClick={() => nav("/admin/products/new")}
-          >
-            + Add product
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={load}
+              style={{
+                padding: isMobile ? "7px 12px" : "8px 14px",
+                borderRadius: 999,
+                border: "1px solid rgba(148,122,173,0.45)",
+                background: "#fff",
+                fontSize: isMobile ? 11.5 : 12,
+                cursor: "pointer",
+                color: "#4a2a73",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+            >
+              ↻ Refresh
+            </button>
+
+            <button
+              type="button"
+              style={{
+                padding: isMobile ? "7px 12px" : "8px 14px",
+                borderRadius: 999,
+                border: "none",
+                background: "linear-gradient(90deg, #7c51a1, #4a2a73)",
+                fontSize: isMobile ? 11.5 : 12,
+                cursor: "pointer",
+                color: "#fff",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+              onClick={() => nav("/admin/products/new")}
+            >
+              + Add product
+            </button>
+          </div>
         </header>
 
-        {/* FILTERS */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
-          {/* Search */}
+        {/* ERROR */}
+        {err && (
           <div
             style={{
-              flex: isMobile ? "1 1 100%" : "1 1 260px",
-              minWidth: isMobile ? 0 : 200,
+              background: "rgba(244,67,54,0.08)",
+              border: "1px solid rgba(244,67,54,0.25)",
+              color: "#b71c1c",
+              padding: "10px 12px",
+              borderRadius: 12,
+              marginBottom: 12,
+              fontSize: 12.5,
             }}
           >
+            {err}
+          </div>
+        )}
+
+        {/* FILTERS */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+          <div style={{ flex: isMobile ? "1 1 100%" : "1 1 260px" }}>
             <input
               type="text"
               placeholder="Search by name or description…"
@@ -187,473 +223,173 @@ export default function AdminProductList() {
             />
           </div>
 
-          {/* Category filter */}
-          <div
-            style={{
-              flex: isMobile ? "1 1 48%" : "0 0 190px",
-              minWidth: isMobile ? 0 : 160,
-            }}
-          >
+          <div style={{ flex: isMobile ? "1 1 48%" : "0 0 190px" }}>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               style={{
                 width: "100%",
-                padding: isMobile ? "8px 11px" : "9px 12px",
+                padding: isMobile ? "8px 10px" : "9px 12px",
                 borderRadius: 999,
                 border: "1px solid rgba(148,122,173,0.5)",
                 fontSize: isMobile ? 12.5 : 13,
-                backgroundColor: "#fff",
+                outline: "none",
+                background: "#fff",
                 boxSizing: "border-box",
               }}
             >
               <option value="all">All categories</option>
               {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
 
-          {/* Status filter */}
-          <div
-            style={{
-              flex: isMobile ? "1 1 48%" : "0 0 180px",
-              minWidth: isMobile ? 0 : 160,
-            }}
-          >
+          <div style={{ flex: isMobile ? "1 1 48%" : "0 0 190px" }}>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               style={{
                 width: "100%",
-                padding: isMobile ? "8px 11px" : "9px 12px",
+                padding: isMobile ? "8px 10px" : "9px 12px",
                 borderRadius: 999,
                 border: "1px solid rgba(148,122,173,0.5)",
                 fontSize: isMobile ? 12.5 : 13,
-                backgroundColor: "#fff",
+                outline: "none",
+                background: "#fff",
                 boxSizing: "border-box",
               }}
             >
-              <option value="all">All statuses</option>
+              <option value="all">All status</option>
               <option value="instock">In stock</option>
               <option value="soldout">Sold out</option>
             </select>
           </div>
-
-          <div
-            style={{
-              flex: isMobile ? "0 0 100%" : 1,
-            }}
-          />
         </div>
 
-        {/* TABLE */}
-        <div
-          style={{
-            borderRadius: 14,
-            border: "1px solid rgba(148,122,173,0.25)",
-            overflow: "hidden",
-            background: "#fff",
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              overflowX: "auto",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                minWidth: 600, // allow scroll on very small screens
-                borderCollapse: "collapse",
-                fontSize: isMobile ? 12 : 13,
-              }}
-            >
-              <thead style={{ background: "#f5effb" }}>
-                <tr>
-                  <Th>Product</Th>
-                  {!isMobile && <Th>Category</Th>}
-                  <Th align="right">Price</Th>
-                  {!isMobile && <Th align="right">Sale</Th>}
-                  <Th>Status</Th>
-                  {!isMobile && <Th align="right">Actions</Th>}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 && (
-                  <tr>
-                    <Td colSpan={6} align="center">
-                      No products match your current filters.
-                    </Td>
-                  </tr>
-                )}
-
-                {filtered.map((p) => {
-                  const hasSale =
-                    p.salePrice != null && p.salePrice !== undefined;
-                  const statusKey = p.soldOut ? "soldout" : "instock";
-
-                  return (
-                    <Tr key={p.id}>
-                      {/* Product info + THUMBNAIL */}
-                      <Td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: isMobile ? 42 : 46,
-                              height: isMobile ? 42 : 46,
-                              borderRadius: 12,
-                              overflow: "hidden",
-                              background: "#eee",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {p.image && (
-                              <img
-                                src={p.image}
-                                alt={p.name}
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "cover",
-                                }}
-                              />
-                            )}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontWeight: 600,
-                                color: "#3c274f",
-                                marginBottom: 2,
-                                fontSize: isMobile ? 12.5 : 13,
-                              }}
-                            >
-                              {p.name}
-                            </div>
-                            {p.short && (
-                              <div
-                                style={{
-                                  fontSize: isMobile ? 10.5 : 11,
-                                  color: "#7a6989",
-                                  maxWidth: isMobile ? 180 : 260,
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {p.short}
-                              </div>
-                            )}
-
-                            {/* Mobile actions inside product cell */}
-                            {isMobile && (
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                  display: "flex",
-                                  flexWrap: "wrap",
-                                  gap: 6,
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  style={{
-                                    fontSize: 10.5,
-                                    padding: "4px 7px",
-                                    borderRadius: 999,
-                                    border:
-                                      "1px solid rgba(148,122,173,0.6)",
-                                    background: "#fff",
-                                    cursor: "pointer",
-                                  }}
-                                  onClick={() =>
-                                    nav(
-                                      `/admin/products/${encodeURIComponent(
-                                        p.id
-                                      )}/edit`
-                                    )
-                                  }
-                                >
-                                  Edit
-                                </button>
-
-                                <button
-                                  type="button"
-                                  style={{
-                                    fontSize: 10.5,
-                                    padding: "4px 7px",
-                                    borderRadius: 999,
-                                    border: "none",
-                                    background:
-                                      "rgba(124,81,161,0.09)",
-                                    color: "#4a2a73",
-                                    cursor: "pointer",
-                                  }}
-                                  onClick={() =>
-                                    handleToggleSoldOut(p.id)
-                                  }
-                                >
-                                  {p.soldOut
-                                    ? "Back in stock"
-                                    : "Mark sold out"}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  style={{
-                                    fontSize: 10.5,
-                                    padding: "4px 7px",
-                                    borderRadius: 999,
-                                    border: "none",
-                                    background:
-                                      "rgba(244,67,54,0.08)",
-                                    color: "#b71c1c",
-                                    cursor: "pointer",
-                                  }}
-                                  onClick={() =>
-                                    handleDelete(p.id, p.name)
-                                  }
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </Td>
-
-                      {!isMobile && <Td>{p.cat || "—"}</Td>}
-
-                      {/* Price / sale */}
-                      <Td align="right">
-                        {hasSale ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "flex-end",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontWeight: 700,
-                                color: "#4a2a73",
-                              }}
-                            >
-                              ${p.salePrice.toFixed(2)}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                color: "#a38fb5",
-                                textDecoration: "line-through",
-                              }}
-                            >
-                              ${p.price.toFixed(2)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span
-                            style={{
-                              fontWeight: 700,
-                              color: "#4a2a73",
-                            }}
-                          >
-                            ${p.price.toFixed(2)}
-                          </span>
-                        )}
-                      </Td>
-
-                      {/* Sale column */}
-                      {!isMobile && (
-                        <Td align="right">
-                          {hasSale ? (
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#2e7d32",
-                                fontWeight: 600,
-                              }}
-                            >
-                              On sale
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#7a6989",
-                              }}
-                            >
-                              —
-                            </span>
-                          )}
-                        </Td>
-                      )}
-
-                      {/* Status pill */}
-                      <StatusTd status={statusKey}>
-                        {p.soldOut ? "Sold out" : "In stock"}
-                      </StatusTd>
-
-                      {/* Desktop actions */}
-                      {!isMobile && (
-                        <Td align="right">
-                          <button
-                            type="button"
-                            style={{
-                              fontSize: 11,
-                              padding: "5px 9px",
-                              borderRadius: 999,
-                              border:
-                                "1px solid rgba(148,122,173,0.6)",
-                              background: "#fff",
-                              cursor: "pointer",
-                              marginRight: 6,
-                            }}
-                            onClick={() =>
-                              nav(
-                                `/admin/products/${encodeURIComponent(
-                                  p.id
-                                )}/edit`
-                              )
-                            }
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            style={{
-                              fontSize: 11,
-                              padding: "5px 9px",
-                              borderRadius: 999,
-                              border: "none",
-                              background: "rgba(124,81,161,0.09)",
-                              color: "#4a2a73",
-                              cursor: "pointer",
-                              marginRight: 6,
-                            }}
-                            onClick={() => handleToggleSoldOut(p.id)}
-                          >
-                            {p.soldOut ? "Back in stock" : "Mark sold out"}
-                          </button>
-
-                          <button
-                            type="button"
-                            style={{
-                              fontSize: 11,
-                              padding: "5px 9px",
-                              borderRadius: 999,
-                              border: "none",
-                              background: "rgba(244,67,54,0.08)",
-                              color: "#b71c1c",
-                              cursor: "pointer",
-                            }}
-                            onClick={() => handleDelete(p.id, p.name)}
-                          >
-                            Delete
-                          </button>
-                        </Td>
-                      )}
-                    </Tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* LIST */}
+        <div style={{ borderRadius: 16, border: "1px solid rgba(148,122,173,0.25)", background: "#fff", overflow: "hidden" }}>
+          <div style={{ padding: isMobile ? 10 : 12, borderBottom: "1px solid rgba(148,122,173,0.18)", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 12.5, color: "#4f3d5c", fontWeight: 700 }}>Product list</div>
+            <div style={{ fontSize: 11.5, color: "#7a6989" }}>{loading ? "Loading…" : `${filtered.length} items`}</div>
           </div>
+
+          {loading ? (
+            <div style={{ padding: 12, fontSize: 13, color: "#7a6989" }}>Loading products…</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 13, color: "#7a6989" }}>No products match your filters.</div>
+          ) : (
+            <div style={{ display: "grid" }}>
+              {filtered.map((p) => {
+                const imgSrc = resolveAdminImageUrl(p.image);
+
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isMobile ? "54px 1fr" : "60px 1fr auto",
+                      gap: 10,
+                      padding: isMobile ? 10 : 12,
+                      borderTop: "1px solid rgba(148,122,173,0.12)",
+                      alignItems: "center",
+                    }}
+                  >
+                    {/* Image */}
+                    <div
+                      style={{
+                        width: isMobile ? 54 : 60,
+                        height: isMobile ? 54 : 60,
+                        borderRadius: 14,
+                        overflow: "hidden",
+                        background: "#f5effb",
+                        border: "1px solid rgba(148,122,173,0.18)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#7a6989",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {!imgFail[p.id] && imgSrc ? (
+                        <img
+                          src={imgSrc}
+                          alt={p.name}
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                          onError={() => setImgFail((prev) => ({ ...prev, [p.id]: true }))}
+                        />
+                      ) : (
+                        "IMG"
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 800,
+                          color: "#3c274f",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={p.name}
+                      >
+                        {p.name}
+                      </div>
+
+                      <div style={{ marginTop: 3, fontSize: 12, color: "#7a6989", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        <span>{p.cat || "—"}</span>
+                        <span>•</span>
+                        <span style={{ color: "#4a2a73", fontWeight: 800 }}>${Number(p.salePrice ?? p.price ?? 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 8, justifyContent: isMobile ? "flex-start" : "flex-end", gridColumn: isMobile ? "2 / span 1" : "auto" }}>
+                      <button
+                        type="button"
+                        onClick={() => nav(`/admin/products/${p.id}/edit`)}
+                        style={{
+                          borderRadius: 999,
+                          border: "1px solid rgba(148,122,173,0.45)",
+                          padding: "7px 10px",
+                          background: "#fff",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          color: "#4a2a73",
+                          fontWeight: 700,
+                        }}
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(p.id, p.name)}
+                        style={{
+                          borderRadius: 999,
+                          border: "1px solid rgba(244,67,54,0.35)",
+                          padding: "7px 10px",
+                          background: "rgba(244,67,54,0.06)",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          color: "#b71c1c",
+                          fontWeight: 800,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </main>
-  );
-}
-
-/* ------- Small UI helpers ------- */
-
-function Th({ children, align = "left" }) {
-  return (
-    <th
-      style={{
-        textAlign: align,
-        padding: "8px 10px",
-        fontWeight: 600,
-        fontSize: 12,
-        color: "#4a2a73",
-        borderBottom: "1px solid rgba(148,122,173,0.25)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, align = "left", colSpan }) {
-  return (
-    <td
-      colSpan={colSpan}
-      style={{
-        textAlign: align,
-        padding: "8px 10px",
-        fontSize: 12,
-        color: "#4f3d5c",
-        borderBottom: "1px solid rgba(148,122,173,0.13)",
-        verticalAlign: "top",
-      }}
-    >
-      {children}
-    </td>
-  );
-}
-
-function Tr({ children }) {
-  return <tr>{children}</tr>;
-}
-
-function StatusTd({ status, children }) {
-  const map = {
-    instock: {
-      bg: "rgba(76,175,80,0.12)",
-      color: "#1b5e20",
-    },
-    soldout: {
-      bg: "rgba(244,67,54,0.12)",
-      color: "#b71c1c",
-    },
-  };
-
-  const sty = map[status] || {
-    bg: "rgba(158,158,158,0.12)",
-    color: "#424242",
-  };
-
-  return (
-    <Td align="left">
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          padding: "3px 8px",
-          borderRadius: 999,
-          fontSize: 11,
-          fontWeight: 600,
-          background: sty.bg,
-          color: sty.color,
-          textTransform: "capitalize",
-        }}
-      >
-        {children}
-      </span>
-    </Td>
   );
 }

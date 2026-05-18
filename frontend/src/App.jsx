@@ -76,7 +76,8 @@ export default function App() {
             {/* ----------- Public Routes ----------- */}
             <Route path="/" element={<Home />} />
             <Route path="/shop" element={<Shop />} />
-            <Route path="/product/:id" element={<ProductDetails />} />
+            <Route path="/product/:slug" element={<ProductDetails />} />
+
             <Route path="/cart" element={<Cart />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/order-confirmation" element={<OrderConfirmation />} />

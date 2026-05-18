@@ -1,12 +1,16 @@
 // frontend/src/pages/ProductDetails.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { CATALOG, getProductById } from "../data/catalog";
 import BestSellerCard from "../components/BestSellerCard";
 import useBreakpoint from "../hooks/useBreakpoint";
 import { colors } from "../theme";
+import { getProductBySlug, getProducts } from "../api/products";
+import { addToCart, getCart } from "../api/cart";
+import { useAuth } from "../auth/AuthContext";
 
-/* ---------------- helpers ---------------- */
+// ✅ Use the SAME resolver used in admin + shop
+import { resolveImageUrl, pickProductImage } from "./admin/adminProductsUtils";
+
 function shuffle(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -16,46 +20,251 @@ function shuffle(arr) {
   return a;
 }
 
-// ---- cart LS helpers (must match Cart.jsx) ----
-const LS_KEY = "cart_v1";
-function readCart() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-function writeCart(items) {
-  localStorage.setItem(LS_KEY, JSON.stringify(items));
-}
-function optionKey(obj) {
-  // stable key for selected options (so different option combos are separate lines)
-  return Object.keys(obj || {})
-    .sort()
-    .map((k) => `${k}:${obj[k]}`)
-    .join("|");
-}
+// StrictMode dev double-mount guard
+const __fetchedSlugs = new Set();
+
+// Fallback sizes (until backend provides)
+const FALLBACK_SIZES = [
+  { id: "S", label: "S", delta: 0 },
+  { id: "M", label: "M (+$10)", delta: 10 },
+  { id: "L", label: "L (+$20)", delta: 20 },
+  { id: "XL", label: "XL (+$35)", delta: 35 },
+];
 
 export default function ProductDetails() {
-  const { id } = useParams();
-  const product = getProductById(id);
+  const { slug: rawSlug } = useParams();
   const nav = useNavigate();
   const bp = useBreakpoint();
   const isMobile = bp.xs || bp.sm;
+  const { isAuthenticated } = useAuth();
 
-  useEffect(() => window.scrollTo(0, 0), [id]);
+  const slug = useMemo(() => {
+    const s = decodeURIComponent(rawSlug || "").trim();
+    return s.replace(/\s+/g, "-").toLowerCase();
+  }, [rawSlug]);
+
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const [recommended, setRecommended] = useState([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(true);
+
+  const [mainImg, setMainImg] = useState(null);
+  const [qty, setQty] = useState(1);
+
+  const [selectedSize, setSelectedSize] = useState(null);
+  const [descOpen, setDescOpen] = useState(true);
+
+  const abortRef = useRef({ aborted: false });
+  useEffect(() => {
+    abortRef.current.aborted = false;
+    return () => {
+      abortRef.current.aborted = true;
+    };
+  }, [slug]);
+
+  useEffect(() => window.scrollTo(0, 0), [slug]);
+
+  useEffect(() => {
+    async function fetchProduct() {
+      if (!slug || slug === "undefined") {
+        setProduct(null);
+        setLoading(false);
+        return;
+      }
+
+      // Prevent StrictMode dev double fetch for same slug
+      if (__fetchedSlugs.has(slug)) return;
+      __fetchedSlugs.add(slug);
+
+      try {
+        setLoading(true);
+
+        const res = await getProductBySlug(slug);
+        const p = res?.data ?? res;
+
+        if (!abortRef.current.aborted) {
+          setProduct(p || null);
+          setSelectedSize((prev) => prev ?? (p?.sizes?.[0]?.id ?? "S"));
+        }
+      } catch (e) {
+        console.error("Failed to load product:", e);
+        if (!abortRef.current.aborted) setProduct(null);
+      } finally {
+        if (!abortRef.current.aborted) setLoading(false);
+      }
+    }
+
+    fetchProduct();
+  }, [slug]);
+
+  // ✅ Images normalization (uses product.images array OR product.imageUrl/image_url etc)
+  const images = useMemo(() => {
+    const imgs = product?.images;
+    const list = Array.isArray(imgs) ? imgs : [];
+
+    const normalizedFromArray = list
+      .map((img) =>
+        typeof img === "string" ? resolveImageUrl(img) : resolveImageUrl(img?.url || img?.imageUrl || img?.image_url)
+      )
+      .filter(Boolean);
+
+    // fallback to "best available" single image field
+    if (normalizedFromArray.length === 0) {
+      const one = pickProductImage(product);
+      const resolved = resolveImageUrl(one);
+      return resolved ? [resolved] : [];
+    }
+
+    return normalizedFromArray;
+  }, [product]);
+
+  const thumbImages = useMemo(
+    () => Array.from(new Set(images)).slice(0, 6),
+    [images]
+  );
+
+  useEffect(() => {
+    if (images.length > 0) setMainImg(images[0]);
+    else setMainImg(null);
+  }, [images, slug]);
+
+  const sizeOptions = useMemo(() => {
+    const s = product?.sizes;
+    if (Array.isArray(s) && s.length) {
+      return s.map((x) => ({
+        id: x.id ?? x.size ?? x.label,
+        label:
+          x.label ??
+          (x.delta
+            ? `${x.size ?? x.id ?? x.label} (+$${Number(x.delta)})`
+            : String(x.size || x.id || x.label)),
+        delta: Number(x.delta || 0),
+      }));
+    }
+    return FALLBACK_SIZES;
+  }, [product]);
+
+  const basePrice = Number(product?.price || 0);
+  const selectedDelta =
+    sizeOptions.find((x) => x.id === selectedSize)?.delta ?? 0;
+  const displayPrice = basePrice + selectedDelta;
+
+  const oldPriceRaw =
+    Number(product?.old_price) ||
+    Number(product?.original_price) ||
+    Number(product?.compare_at_price) ||
+    0;
+
+  const hasDiscount = oldPriceRaw > displayPrice;
+  const discountPercent = hasDiscount
+    ? Math.round(((oldPriceRaw - displayPrice) / oldPriceRaw) * 100)
+    : 0;
+
+  useEffect(() => {
+    async function fetchRecommended() {
+      if (!product) return;
+      try {
+        setRecommendedLoading(true);
+        const res = await getProducts({});
+        const list = Array.isArray(res) ? res : res?.data ?? [];
+        const filtered = list.filter((p) => p.slug !== product.slug);
+
+        const mapped = filtered.map((p) => {
+          const img = resolveImageUrl(pickProductImage(p));
+          return {
+            id: p.id,
+            slug: p.slug,
+            name: p.name,
+            price: Number(p.salePrice ?? p.price ?? 0),
+            image: img,
+          };
+        });
+
+        setRecommended(shuffle(mapped).slice(0, isMobile ? 4 : 8));
+      } catch (e) {
+        console.error("Failed to load recommended:", e);
+        setRecommended([]);
+      } finally {
+        setRecommendedLoading(false);
+      }
+    }
+
+    fetchRecommended();
+  }, [product, isMobile]);
+
+  const onAddRecommended = async (p) => {
+    if (!p?.id) {
+      alert("This item can't be added (missing product id).");
+      return;
+    }
+    if (!isAuthenticated) {
+      alert("Please login first");
+      nav("/login");
+      return;
+    }
+    try {
+      await addToCart(p.id, 1);
+      await getCart();
+      alert("Added to cart ✓");
+      window.navigator.vibrate?.(10);
+    } catch (err) {
+      console.error("Recommended add failed:", err);
+      alert(err?.message || "Failed to add to cart");
+    }
+  };
+
+  const onAddToCart = async () => {
+    if (!product) return;
+    if (!selectedSize) {
+      alert("Please select a size");
+      return;
+    }
+    if (!isAuthenticated) {
+      alert("Please login first");
+      nav("/login");
+      return;
+    }
+    try {
+      await addToCart(product.id, qty);
+      alert("Added to cart ✓");
+      window.navigator.vibrate?.(10);
+    } catch (err) {
+      console.error("Add to cart failed:", err);
+      alert(err?.message || "Failed to add to cart");
+    }
+  };
+
+  const shareLink = async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied!");
+    } catch {
+      alert(url);
+    }
+  };
+
+  if (loading) {
+    return (
+      <main style={{ padding: "120px 20px" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
+          <h2>Loading…</h2>
+        </div>
+      </main>
+    );
+  }
 
   if (!product) {
     return (
       <main style={{ padding: "120px 20px" }}>
         <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
           <h2>Product not found</h2>
-          <p>It looks like this item doesn’t exist or was removed.</p>
+          <p>Item doesn’t exist / was removed / or URL is invalid.</p>
           <button
             onClick={() => nav(-1)}
             style={{
+              marginTop: 16,
               padding: "10px 16px",
               borderRadius: 12,
               border: "1px solid #e6e1ea",
@@ -71,507 +280,367 @@ export default function ProductDetails() {
     );
   }
 
-  /* ----- state ----- */
-  const [mainImg, setMainImg] = useState(product.gallery?.[0] || product.image);
-  const [qty, setQty] = useState(1);
-
-  // options state: works with array-based options [{label, required, values:[{label, priceDelta?}]}]
-  const [sel, setSel] = useState({});
-  const [showOptionsError, setShowOptionsError] = useState(false);
-
-  const hasSale =
-    typeof product.salePrice === "number" && product.salePrice < product.price;
-
-  // required groups & missing
-  const requiredGroups = (product.options || []).filter((g) => g.required);
-  const missingRequired = requiredGroups.filter((g) => !sel[g.label]);
-
-  // compute final unit price with deltas
-  const base = hasSale ? product.salePrice : product.price;
-  const chosenDeltas = (product.options || []).flatMap((g) => {
-    const v = sel[g.label];
-    if (!v) return [];
-    const found = g.values.find((x) => x.label === v);
-    return found?.priceDelta ? [found.priceDelta] : [];
-  });
-  const finalPrice = base + chosenDeltas.reduce((a, b) => a + b, 0);
-
-  const savingsPct = hasSale
-    ? Math.round((1 - product.salePrice / product.price) * 100)
-    : 0;
-
-  const priceText = `$${finalPrice.toFixed(2)}`;
-
-  const related = useMemo(() => {
-    const same = CATALOG.filter((p) => p.cat === product.cat && p.id !== product.id);
-    const rest = CATALOG.filter((p) => p.cat !== product.cat && p.id !== product.id);
-    const pick = shuffle(same).slice(0, 4).concat(shuffle(rest).slice(0, 4));
-    return shuffle(pick).slice(0, isMobile ? 4 : 6);
-  }, [product.id, product.cat, isMobile]);
-  const relCols = bp.xs ? 1 : bp.sm ? 2 : 3;
-
-  const onAddToCart = () => {
-  if (missingRequired.length > 0) {
-    setShowOptionsError(true);
-    document
-      .querySelector("#options-start")
-      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    return;
-  }
-
-  // Create unique ID based on product + selected options
-  const optKey = optionKey(sel);
-  const lineId = optKey ? `${product.id}__${optKey}` : product.id;
-
-  const item = {
-    id: lineId,
-    name: product.name,
-    image: product.image,
-    price: finalPrice,
-    compareAt: hasSale ? product.price : undefined,
-    qty,
-    sku: product.id,
-    options: sel,
-    cat: product.cat,
-  };
-
-  const items = readCart();
-  const existing = items.find((x) => x.id === lineId);
-
-  if (existing) {
-    existing.qty = Math.max(1, (existing.qty || 1) + qty);
-  } else {
-    items.push(item);
-  }
-
-  writeCart(items);
-
-  // ✅ Just show a small confirmation – no navigation
-  alert("Added to cart ✓");
-};
-
-
-  const shareLink = async () => {
-    const url = window.location.href;
-    try {
-      await navigator.clipboard.writeText(url);
-      alert("Link copied!");
-    } catch {
-      alert(url);
-    }
-  };
-
-  const Stars = ({ value = 4.7 }) => {
-    const full = Math.floor(value);
-    const half = value - full >= 0.5;
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        {Array.from({ length: 5 }).map((_, i) => {
-          const active = i < full || (i === full && half);
-          return (
-            <span
-              key={i}
-              style={{ fontSize: 16, color: active ? "#f5a524" : "#d8d2e0" }}
-            >
-              ★
-            </span>
-          );
-        })}
-        <span style={{ fontSize: 13, color: "#6f6280" }}>
-          {value.toFixed(1)} • 32 reviews
-        </span>
-      </div>
-    );
-  };
+  const recCols = bp.xs ? 1 : bp.sm ? 2 : bp.md ? 3 : 4;
 
   return (
-    <main>
-      {/* Hero */}
+    <main style={{ background: "#f6f4f8" }}>
       <section
         style={{
-          background:
-            "linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.35)), url(/hero.jpeg) center/cover no-repeat",
-          color: "#fff",
-          minHeight: isMobile ? 140 : 200,
-          display: "grid",
-          placeItems: "center",
-          textAlign: "center",
-          paddingTop: "clamp(90px, 14vw, 120px)",
-          paddingBottom: isMobile ? 16 : 26,
-          paddingInline: 16,
-        }}
-      >
-        <div style={{ maxWidth: 1100, width: "100%" }}>
-          <nav style={{ fontSize: 13, opacity: 0.9, textAlign: "left" }}>
-            <Link to="/" style={{ color: "#fff" }}>
-              Home
-            </Link>
-            <span style={{ margin: "0 6px" }}>/</span>
-            <Link to="/shop" style={{ color: "#fff" }}>
-              Shop
-            </Link>
-            <span style={{ margin: "0 6px" }}>/</span>
-            <Link to="/shop" style={{ color: "#fff" }}>
-              {product.cat}
-            </Link>
-            <span style={{ margin: "0 6px" }}>/</span>
-            <span style={{ opacity: 0.9 }}>{product.name}</span>
-          </nav>
-          <h1 style={{ margin: "8px 0 0", fontSize: isMobile ? 24 : 36 }}>
-            {product.name}
-          </h1>
-        </div>
-      </section>
-
-      {/* Main Content */}
-      <section
-        style={{
-          background: "#faf9fb",
-          padding: isMobile ? "16px 12px 40px" : "40px 20px 70px",
+          padding: isMobile ? "90px 12px 30px" : "110px 20px 40px",
         }}
       >
         <div
           style={{
-            maxWidth: 1100,
+            maxWidth: 1200,
             margin: "0 auto",
             display: "grid",
             gridTemplateColumns: isMobile ? "1fr" : "1.05fr 0.95fr",
-            gap: isMobile ? 16 : 26,
+            gap: isMobile ? 16 : 22,
+            alignItems: "start",
           }}
         >
-          {/* Left: Full Image Card */}
+          {/* LEFT */}
           <div>
             <div
               style={{
+                background: "#c9c5c0",
+                borderRadius: 28,
+                padding: 18,
                 position: "relative",
-                borderRadius: 24,
-                overflow: "hidden",
-                border: "1px solid #eee6f5",
-                boxShadow: "0 8px 24px rgba(102, 51, 153, 0.1)",
-                background: "#fff",
-                aspectRatio: isMobile ? "1/1" : "4/3",
+                boxShadow: "0 14px 34px rgba(0,0,0,.10)",
               }}
             >
-              <img
-                src={mainImg}
-                alt={product.name}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  objectPosition: "center",
-                  transition: "transform .35s ease",
-                }}
-                onMouseOver={(e) =>
-                  !isMobile && (e.currentTarget.style.transform = "scale(1.03)")
-                }
-                onMouseOut={(e) =>
-                  !isMobile && (e.currentTarget.style.transform = "scale(1)")
-                }
-              />
-
-              {hasSale && (
+              {hasDiscount && (
                 <div
                   style={{
                     position: "absolute",
-                    top: 20,
-                    left: 20,
-                    background: "#ff4d4f",
+                    top: 14,
+                    left: 14,
+                    background: "#ff5b5b",
                     color: "#fff",
+                    fontWeight: 900,
+                    fontSize: 12,
                     padding: "8px 12px",
                     borderRadius: 999,
-                    fontWeight: 800,
-                    fontSize: 12,
-                    boxShadow: "0 6px 16px rgba(0,0,0,.15)",
+                    boxShadow: "0 10px 20px rgba(255,91,91,.25)",
                   }}
                 >
-                  Save {savingsPct}%
+                  Save {discountPercent}%
                 </div>
               )}
 
               <button
                 onClick={shareLink}
-                title="Copy link"
                 style={{
                   position: "absolute",
-                  top: 20,
-                  right: 20,
-                  background: "rgba(255,255,255,.9)",
-                  border: "1px solid #e6e1ea",
+                  top: 14,
+                  right: 14,
+                  background: "rgba(255,255,255,.95)",
+                  border: "1px solid rgba(0,0,0,.08)",
                   borderRadius: 999,
-                  padding: "8px 10px",
+                  padding: "8px 12px",
                   cursor: "pointer",
-                  fontWeight: 700,
+                  fontWeight: 800,
                   fontSize: 12,
                 }}
               >
                 Share ⤴
               </button>
+
+              <div
+                style={{
+                  borderRadius: 22,
+                  overflow: "hidden",
+                  background: "#fff",
+                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,.06)",
+                }}
+              >
+                {mainImg ? (
+                  <img
+                    src={mainImg}
+                    alt={product.name}
+                    style={{
+                      width: "100%",
+                      height: isMobile ? 380 : 500,
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      height: isMobile ? 380 : 500,
+                      display: "grid",
+                      placeItems: "center",
+                      color: "#6b5a7a",
+                      fontWeight: 900,
+                    }}
+                  >
+                    No image
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Thumbnails */}
-            {product.gallery && product.gallery.length > 1 && (
+            {thumbImages.length > 0 && (
               <div
                 style={{
-                  display: "flex",
-                  gap: 10,
                   marginTop: 12,
+                  display: "flex",
                   justifyContent: "center",
-                  flexWrap: "wrap",
                 }}
               >
-                {product.gallery.map((g) => {
-                  const active = mainImg === g;
-                  return (
-                    <button
-                      key={g}
-                      onClick={() => setMainImg(g)}
-                      style={{
-                        border: active
-                          ? `2px solid ${colors.vividPurple}`
-                          : "1px solid #ddd",
-                        borderRadius: 14,
-                        overflow: "hidden",
-                        padding: 0,
-                        background: "#fff",
-                        cursor: "pointer",
-                        width: isMobile ? 64 : 78,
-                        height: isMobile ? 64 : 78,
-                      }}
-                      aria-label="Change image"
-                    >
-                      <img
-                        src={g}
-                        alt=""
+                <div
+                  style={{
+                    background: "#ece8ef",
+                    borderRadius: 18,
+                    padding: "10px 12px",
+                    display: "flex",
+                    gap: 12,
+                    boxShadow: "0 10px 22px rgba(0,0,0,.08)",
+                    overflowX: "auto",
+                    maxWidth: "100%",
+                  }}
+                >
+                  {thumbImages.map((g) => {
+                    const active = mainImg === g;
+                    return (
+                      <button
+                        key={g}
+                        onClick={() => setMainImg(g)}
                         style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
+                          border: active
+                            ? `2px solid ${colors.vividPurple}`
+                            : "1px solid rgba(0,0,0,.10)",
+                          borderRadius: 14,
+                          padding: 0,
+                          background: "#fff",
+                          cursor: "pointer",
+                          width: 74,
+                          height: 74,
+                          overflow: "hidden",
+                          boxShadow: active
+                            ? "0 10px 18px rgba(102,51,153,.18)"
+                            : "0 8px 16px rgba(0,0,0,.06)",
+                          flex: "0 0 auto",
                         }}
-                      />
-                    </button>
-                  );
-                })}
+                        title="View"
+                      >
+                        <img
+                          src={g}
+                          alt=""
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
 
-          {/* Right: Buy Box */}
-          <div
-            style={{
-              position: isMobile ? "static" : "sticky",
-              top: isMobile ? 0 : 92,
-              alignSelf: "start",
-            }}
-          >
+          {/* RIGHT (your UI stays as you had it) */}
+          <div>
+            {/* --- your existing RIGHT side content below remains unchanged --- */}
+            {/* (Everything below is exactly your provided content) */}
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e6e1ea",
-                borderRadius: 20,
-                padding: isMobile ? 14 : 22,
-                boxShadow: "0 18px 36px rgba(102,51,153,.06)",
+                borderRadius: 22,
+                border: "1px solid rgba(0,0,0,.06)",
+                padding: 18,
+                boxShadow: "0 14px 34px rgba(0,0,0,.08)",
               }}
             >
               <div
                 style={{
                   display: "flex",
-                  alignItems: "center",
                   justifyContent: "space-between",
+                  gap: 12,
                 }}
               >
-                <Stars />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    color: "#6b5a7a",
+                    fontSize: 13,
+                  }}
+                >
+                  <span style={{ letterSpacing: 1 }}>★★★★★</span>
+                  <span style={{ opacity: 0.9 }}>4.7 • 32 reviews</span>
+                </div>
+
                 <span
                   style={{
-                    fontSize: 12,
+                    background: "#e9f7ee",
+                    color: "#1f7a3a",
                     fontWeight: 800,
-                    color: "#2a9248",
-                    background: "#eaf8ef",
-                    border: "1px solid #d2eedb",
+                    fontSize: 12,
                     padding: "6px 10px",
                     borderRadius: 999,
+                    border: "1px solid #cdeed7",
+                    height: "fit-content",
                   }}
                 >
                   In stock
                 </span>
               </div>
 
-              {/* Price row (uses finalPrice) */}
               <div
                 style={{
+                  marginTop: 10,
                   display: "flex",
                   alignItems: "baseline",
                   gap: 10,
-                  marginTop: 10,
                 }}
               >
                 <div
                   style={{
-                    fontSize: isMobile ? 24 : 32,
+                    fontSize: 34,
                     fontWeight: 900,
                     color: colors.royalPlum,
                   }}
                 >
-                  {priceText}
+                  ${displayPrice.toFixed(2)}
                 </div>
-                {hasSale && (
+                {hasDiscount && (
                   <div
                     style={{
+                      color: "#9b90a7",
                       textDecoration: "line-through",
-                      opacity: 0.6,
-                      fontSize: isMobile ? 14 : 16,
+                      fontWeight: 700,
                     }}
                   >
-                    ${product.price.toFixed(2)}
+                    ${oldPriceRaw.toFixed(2)}
                   </div>
                 )}
               </div>
 
-              {product.short && (
-                <p style={{ marginTop: 10, opacity: 0.9, fontSize: 14 }}>
-                  {product.short}
-                </p>
-              )}
-
-              {/* OPTIONS */}
-              <div id="options-start" />
-              {Array.isArray(product.options) && product.options.length > 0 && (
-                <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
-                  {product.options.map((group) => (
-                    <div key={group.label}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 8,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight: 800,
-                            fontSize: 13,
-                            color: "#3c2d4f",
-                          }}
-                        >
-                          {group.label}
-                        </div>
-                        {group.required && (
-                          <span
-                            style={{
-                              fontSize: 12,
-                              color: "#a25555",
-                              background: "#fdecec",
-                              border: "1px solid #f7d2d2",
-                              borderRadius: 999,
-                              padding: "2px 8px",
-                            }}
-                          >
-                            Required
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {group.values.map((val) => {
-                          const active = sel[group.label] === val.label;
-                          const delta = val.priceDelta || 0;
-                          return (
-                            <button
-                              key={val.label}
-                              onClick={() => {
-                                setSel((s) => ({ ...s, [group.label]: val.label }));
-                                setShowOptionsError(false);
-                              }}
-                              style={{
-                                padding: "10px 12px",
-                                borderRadius: 999,
-                                border: active
-                                  ? `2px solid ${colors.vividPurple}`
-                                  : "1px solid #e6e1ea",
-                                background: active ? "#f4ecfb" : "#fff",
-                                fontSize: 13,
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                              aria-pressed={active}
-                            >
-                              {val.label}
-                              {delta ? ` (+$${delta})` : ""}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-
-                  {showOptionsError && missingRequired.length > 0 && (
-                    <div style={{ color: "#b03a3a", fontSize: 12.5, marginTop: 2 }}>
-                      Please choose: {missingRequired.map((g) => g.label).join(", ")}.
-                    </div>
-                  )}
+              {product.description && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    color: "#5f516c",
+                    fontSize: 13,
+                  }}
+                >
+                  {product.description}
                 </div>
               )}
 
-              {/* Qty + Add to Cart */}
+              <div style={{ marginTop: 16 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 13,
+                      color: "#3a2f44",
+                    }}
+                  >
+                    Size
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "#f6ecf1",
+                      color: "#9a3556",
+                      border: "1px solid rgba(154,53,86,.18)",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Required
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {sizeOptions.map((s) => {
+                    const active = selectedSize === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setSelectedSize(s.id)}
+                        style={{
+                          border: active
+                            ? `2px solid ${colors.vividPurple}`
+                            : "1px solid rgba(0,0,0,.12)",
+                          background: "#fff",
+                          borderRadius: 999,
+                          padding: "10px 14px",
+                          cursor: "pointer",
+                          fontWeight: 900,
+                          fontSize: 13,
+                          boxShadow: active
+                            ? "0 10px 18px rgba(102,51,153,.14)"
+                            : "none",
+                        }}
+                      >
+                        {s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "auto 1fr",
-                  gap: 10,
-                  alignItems: "center",
                   marginTop: 16,
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "120px 1fr",
+                  gap: 12,
+                  alignItems: "center",
                 }}
               >
                 <div
                   style={{
-                    display: "inline-flex",
+                    display: "flex",
                     alignItems: "center",
-                    border: "1px solid #e1dbe8",
-                    borderRadius: 12,
+                    border: "1px solid rgba(0,0,0,.12)",
+                    borderRadius: 16,
                     overflow: "hidden",
-                    background: "#fafafa",
+                    background: "#fff",
+                    height: 46,
                   }}
                 >
                   <button
                     onClick={() => setQty((q) => Math.max(1, q - 1))}
-                    style={{
-                      padding: "10px 14px",
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      fontSize: 18,
-                    }}
+                    style={qtyBtn2}
                   >
                     −
                   </button>
-                  <input
-                    type="number"
-                    min={1}
-                    value={qty}
-                    onChange={(e) =>
-                      setQty(Math.max(1, Number(e.target.value) || 1))
-                    }
+                  <div
                     style={{
-                      width: 64,
+                      width: 48,
                       textAlign: "center",
-                      border: "none",
-                      background: "transparent",
-                      padding: "10px 0",
-                      fontSize: 16,
+                      fontWeight: 900,
                     }}
-                  />
+                  >
+                    {qty}
+                  </div>
                   <button
                     onClick={() => setQty((q) => q + 1)}
-                    style={{
-                      padding: "10px 14px",
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      fontSize: 18,
-                    }}
+                    style={qtyBtn2}
                   >
                     +
                   </button>
@@ -580,101 +649,154 @@ export default function ProductDetails() {
                 <button
                   onClick={onAddToCart}
                   style={{
-                    width: "100%",
-                    background: `linear-gradient(90deg, ${colors.vividPurple}, ${colors.royalPlum})`,
-                    color: "#fff",
-                    padding: "12px 16px",
-                    borderRadius: 14,
+                    height: 46,
+                    borderRadius: 16,
                     border: "none",
                     cursor: "pointer",
+                    background: colors.royalPlum,
+                    color: "#fff",
                     fontWeight: 900,
-                    letterSpacing: 0.3,
-                    boxShadow: "0 10px 22px rgba(102,51,153,.18)",
+                    boxShadow: "0 14px 30px rgba(93,44,121,.22)",
                   }}
                 >
                   Add to cart
                 </button>
               </div>
 
-              {/* Trust badges */}
               <div
                 style={{
+                  marginTop: 14,
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: 8,
-                  marginTop: 14,
-                  fontSize: 12.5,
-                  color: "#6f6280",
+                  gap: 10,
                 }}
               >
-                <div style={pill}>✓ 3–5 day shipping</div>
-                <div style={pill}>✓ 7-day returns</div>
-                <div style={pill}>✓ Secure checkout</div>
+                {["3-5 day shipping", "7-day returns", "Secure checkout"].map(
+                  (t) => (
+                    <span
+                      key={t}
+                      style={{
+                        fontSize: 12,
+                        color: "#6b5a7a",
+                        border: "1px solid rgba(0,0,0,.10)",
+                        background: "#fff",
+                        padding: "8px 10px",
+                        borderRadius: 999,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 999,
+                          border: "1px solid rgba(0,0,0,.12)",
+                          display: "inline-grid",
+                          placeItems: "center",
+                          fontSize: 12,
+                        }}
+                      >
+                        ✓
+                      </span>
+                      {t}
+                    </span>
+                  )
+                )}
               </div>
             </div>
 
-            {/* Description + Specs */}
-            <div style={{ marginTop: 18 }}>
-              {product.description && (
-                <Accordion title="Description">
-                  <p style={{ margin: 0, lineHeight: 1.7 }}>{product.description}</p>
-                </Accordion>
-              )}
-              {product.specs && Object.keys(product.specs).length > 0 && (
-                <Accordion title="Specifications">
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-                      gap: 10,
-                    }}
-                  >
-                    {Object.entries(product.specs).map(([k, v]) => (
-                      <div
-                        key={k}
-                        style={{
-                          background: "#fff",
-                          border: "1px solid #eee7f2",
-                          borderRadius: 12,
-                          padding: "10px 12px",
-                        }}
-                      >
-                        <div style={{ fontWeight: 800, marginBottom: 4 }}>{k}</div>
-                        <div style={{ opacity: 0.9 }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                </Accordion>
+            <div
+              style={{
+                marginTop: 14,
+                background: "#fff",
+                borderRadius: 18,
+                border: "1px solid rgba(0,0,0,.06)",
+                boxShadow: "0 12px 28px rgba(0,0,0,.06)",
+                overflow: "hidden",
+              }}
+            >
+              <button
+                onClick={() => setDescOpen((v) => !v)}
+                style={{
+                  width: "100%",
+                  padding: "14px 16px",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontWeight: 900,
+                }}
+              >
+                <span>Description</span>
+                <span style={{ fontSize: 18, opacity: 0.75 }}>
+                  {descOpen ? "−" : "+"}
+                </span>
+              </button>
+
+              {descOpen && (
+                <div
+                  style={{
+                    padding: "0 16px 16px",
+                    color: "#5f516c",
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {product.long_description ||
+                    product.description ||
+                    "This item is hand-crafted in small batches with premium materials and a protective top coat."}
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Related products */}
-        {related.length > 0 && (
-          <div style={{ maxWidth: 1100, margin: "38px auto 0" }}>
-            <h3 style={{ margin: "0 0 12px", fontSize: 20 }}>You may also like</h3>
+        {!recommendedLoading && recommended.length > 0 && (
+          <div style={{ maxWidth: 1200, margin: "26px auto 0" }}>
             <div
               style={{
-                display: "grid",
-                gap: isMobile ? 14 : 20,
-                gridTemplateColumns: `repeat(${relCols}, 1fr)`,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 10,
               }}
             >
-              {related.map((p, i) => (
-                <Link
+              <h3 style={{ margin: 0 }}>Recommended from Shop</h3>
+              <Link
+                to="/shop"
+                style={{
+                  color: colors.vividPurple,
+                  fontWeight: 900,
+                  fontSize: 13,
+                }}
+              >
+                View all →
+              </Link>
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                display: "grid",
+                gap: isMobile ? 14 : 18,
+                gridTemplateColumns: `repeat(${recCols}, 1fr)`,
+              }}
+            >
+              {recommended.map((p) => (
+                <BestSellerCard
                   key={p.id}
-                  to={`/product/${p.id}`}
-                  style={{ textDecoration: "none", color: "inherit" }}
-                >
-                  <BestSellerCard
-                    image={p.image}
-                    name={p.name}
-                    price={p.salePrice ?? p.price}
-                    salePrice={p.salePrice}
-                    index={i}
-                  />
-                </Link>
+                  id={p.id}
+                  image={p.image}
+                  name={p.name}
+                  price={p.price}
+                  slug={p.slug}
+                  onAdd={onAddRecommended}
+                />
               ))}
             </div>
           </div>
@@ -684,46 +806,12 @@ export default function ProductDetails() {
   );
 }
 
-/* Accordion Component */
-function Accordion({ title, children }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div
-      style={{
-        border: "1px solid #e6e1ea",
-        borderRadius: 14,
-        background: "#fff",
-        overflow: "hidden",
-        marginBottom: 10,
-      }}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "12px 14px",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          fontWeight: 800,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <span>{title}</span>
-        <span style={{ opacity: 0.6 }}>{open ? "−" : "+"}</span>
-      </button>
-      {open && <div style={{ padding: "0 14px 14px" }}>{children}</div>}
-    </div>
-  );
-}
-
-const pill = {
-  background: "#fff",
-  border: "1px solid #e6e1ea",
-  borderRadius: 999,
-  padding: "8px 10px",
-  textAlign: "center",
+const qtyBtn2 = {
+  width: 40,
+  height: 46,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: 20,
+  fontWeight: 900,
 };

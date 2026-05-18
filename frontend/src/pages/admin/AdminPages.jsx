@@ -1,45 +1,47 @@
 // frontend/src/pages/admin/AdminPages.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import useBreakpoint from "../../hooks/useBreakpoint";
 
-const LS_PAGES_KEY = "cms_pages_v1";
+// ─── API CONFIG ───────────────────────────────────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
+const getToken = () => localStorage.getItem("auth_token") || "";
 
-const PAGE_SLUGS = ["home", "about", "contact", "faq", "legal"];
-
-/* ---------- Storage helpers ---------- */
-
-function readPagesState() {
-  try {
-    const raw = localStorage.getItem(LS_PAGES_KEY);
-    if (!raw) return getDefaultPages();
-    const parsed = JSON.parse(raw);
-    return { ...getDefaultPages(), ...parsed };
-  } catch {
-    return getDefaultPages();
-  }
+async function fetchAllPages() {
+  const res = await fetch(`${API_BASE}/pages`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load pages (${res.status})`);
+  return res.json(); // { home: {...}, about: {...}, ... }
 }
 
-function writePagesState(obj) {
-  try {
-    localStorage.setItem(LS_PAGES_KEY, JSON.stringify(obj));
-  } catch {
-    /* ignore */
+async function savePage(slug, content) {
+  const res = await fetch(`${API_BASE}/admin/pages/${slug}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to save (${res.status})`);
   }
+  return res.json();
 }
 
+// ─── DEFAULT CONTENT (fallback while loading) ─────────────────────────────────
 function getDefaultPages() {
   return {
     home: {
       heroTitle: "Handmade resin art for your dream space.",
-      heroSubtitle:
-        "Unique, custom-made pieces crafted with love in Lebanon.",
+      heroSubtitle: "Unique, custom-made pieces crafted with love in Lebanon.",
       heroTagline: "Highlight a main message or promo here.",
       heroButtonLabel: "Shop now",
     },
     about: {
       title: "About Utopia by Rim",
-      body: `Write your brand story here. 
-Who you are, why you started, what makes your resin pieces special, your process, and your values.`,
+      body: "Write your brand story here.",
     },
     contact: {
       title: "Contact",
@@ -47,69 +49,87 @@ Who you are, why you started, what makes your resin pieces special, your process
       phone: "+961 70 000 000",
       whatsapp: "+961 70 000 000",
       address: "Beirut, Lebanon",
-      note: "You can also update WhatsApp & social links in Settings.",
+      note: "",
     },
     faq: {
-      intro:
-        "Answer common questions here so customers feel comfortable before ordering.",
-      content: `Q: How long does it take to receive my order?
-A: Production usually takes 5–10 days depending on the item.
-
-Q: Do you accept custom orders?
-A: Yes! Contact us on WhatsApp or Instagram with your idea.`,
+      intro: "Answer common questions here.",
+      content: "",
     },
     legal: {
       title: "Terms & Conditions",
-      content: `Write your store policies here: returns, refunds, delivery, damage, payment rules, etc.`,
+      content: "",
     },
   };
 }
 
-/* ---------- Main component ---------- */
+const PAGE_SLUGS = ["home", "contact", "faq", "legal"];
 
+function labelForSlug(slug) {
+  return { home: "Home", about: "About", contact: "Contact", faq: "FAQ", legal: "Legal" }[slug] ?? slug;
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function AdminPages() {
   const bp = useBreakpoint();
   const isMobile = bp.xs || bp.sm;
 
-  const [pages, setPages] = useState(() => readPagesState());
+  const [pages, setPages]           = useState(getDefaultPages());
   const [activeSlug, setActiveSlug] = useState("home");
-  const [saving, setSaving] = useState(false);
-  const [savedFlag, setSavedFlag] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState(null);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState(null);
+  const [savedFlag, setSavedFlag]   = useState(false);
 
-  useEffect(() => {
-    // ensure defaults merged
-    setPages((prev) => ({ ...getDefaultPages(), ...prev }));
-  }, []);
+  // ─── Load all pages from API on mount ──────────────────────────────────────
+  // Load once on mount — deep merge each page with defaults
+  const loadPages = () => {
+    console.log("LOAD PAGES CALLED", new Error().stack);
+    setLoading(true);
+    setLoadError(null);
+    fetchAllPages()
+      .then((data) => {
+        const defaults = getDefaultPages();
+        const merged = {};
+        for (const slug of Object.keys(defaults)) {
+          merged[slug] = { ...defaults[slug], ...(data[slug] ?? {}) };
+        }
+        setPages(merged);
+      })
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  };
 
-  const activePageData = useMemo(
-    () => pages[activeSlug] || {},
-    [pages, activeSlug]
-  );
+  useEffect(() => { loadPages(); }, []); // eslint-disable-line
+
+  // Read directly from state
+  const activePageData = pages[activeSlug] || {};
 
   const updateField = (slug, field, value) => {
     setPages((prev) => ({
       ...prev,
-      [slug]: {
-        ...(prev[slug] || {}),
-        [field]: value,
-      },
+      [slug]: { ...(prev[slug] || {}), [field]: value },
     }));
   };
 
-  const onSave = (e) => {
-    if (e) e.preventDefault();
+  // ─── Save active page — plain function, always closes over latest pages state
+  const onSave = async () => {
+    if (saving) return;
     setSaving(true);
-    writePagesState(pages);
-    setSaving(false);
-    setSavedFlag(true);
-    setTimeout(() => setSavedFlag(false), 1500);
-  };
-
-  const layoutStyle = {
-    display: "grid",
-    gridTemplateColumns: isMobile ? "1fr" : "220px 1fr",
-    gap: 14,
-    alignItems: "flex-start",
+    setSaveError(null);
+    const slug = activeSlug;
+    const snapshot = { ...pages[slug] }; // copy current state at click time
+    try {
+      await savePage(slug, snapshot);
+      // Don't overwrite state — user already sees correct value from typing
+      // Just show the confirmation badge
+      setSavedFlag(true);
+      setTimeout(() => setSavedFlag(false), 2000);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -126,43 +146,38 @@ export default function AdminPages() {
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: 20, color: "#3c274f" }}>
-            Pages
-          </h1>
+          <h1 style={{ margin: 0, fontSize: 20, color: "#3c274f" }}>Pages</h1>
           <p style={{ marginTop: 6, fontSize: 13, color: "#7a6989" }}>
             Edit the main text for your Home, About, Contact, FAQ and Legal pages.
           </p>
           <p style={{ marginTop: 2, fontSize: 11, color: "#a38fb5" }}>
-            Changes are saved in your browser (local demo). In a real
-            backend this would be stored in the database.
+            Changes are saved to the database.
           </p>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           {savedFlag && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "#2e7d32",
-                background: "rgba(76,175,80,0.1)",
-                borderRadius: 999,
-                padding: "4px 8px",
-              }}
-            >
+            <span style={{
+              fontSize: 11, color: "#2e7d32",
+              background: "rgba(76,175,80,0.1)",
+              borderRadius: 999, padding: "4px 10px",
+            }}>
               Saved ✓
+            </span>
+          )}
+          {saveError && (
+            <span style={{
+              fontSize: 11, color: "#b71c1c",
+              background: "rgba(244,67,54,0.1)",
+              borderRadius: 999, padding: "4px 10px",
+            }}>
+              ⚠ {saveError}
             </span>
           )}
           <button
             type="button"
             onClick={onSave}
-            disabled={saving}
+            disabled={saving || loading}
             style={{
               padding: "7px 14px",
               borderRadius: 999,
@@ -171,20 +186,60 @@ export default function AdminPages() {
               color: "#fff",
               fontSize: 12,
               fontWeight: 600,
-              cursor: "pointer",
-              opacity: saving ? 0.7 : 1,
+              cursor: saving || loading ? "not-allowed" : "pointer",
+              opacity: saving || loading ? 0.7 : 1,
             }}
           >
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? "Saving…" : `Save ${labelForSlug(activeSlug)}`}
           </button>
         </div>
       </header>
 
+      {/* LOAD ERROR */}
+      {loadError && (
+        <div style={{
+          marginBottom: 12,
+          padding: "10px 14px",
+          borderRadius: 10,
+          background: "rgba(244,67,54,0.07)",
+          border: "1px solid rgba(244,67,54,0.3)",
+          color: "#b71c1c",
+          fontSize: 13,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 10,
+        }}>
+          <span>⚠ Failed to load pages: {loadError}</span>
+          <button
+            onClick={loadPages}
+            style={{
+              fontSize: 11, padding: "4px 10px", borderRadius: 999,
+              border: "none", background: "#b71c1c", color: "#fff", cursor: "pointer",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* LOADING */}
+      {loading && (
+        <div style={{ padding: "30px 0", textAlign: "center", color: "#7a6989", fontSize: 13 }}>
+          Loading pages…
+        </div>
+      )}
+
       {/* LAYOUT: sidebar + editor */}
-      <div style={layoutStyle}>
-        {/* LEFT: Page selection */}
-        <aside
-          style={{
+      {!loading && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "220px 1fr",
+          gap: 14,
+          alignItems: "flex-start",
+        }}>
+          {/* LEFT: page selector */}
+          <aside style={{
             borderRadius: 14,
             border: "1px solid rgba(148,122,173,0.25)",
             background: "#faf6ff",
@@ -193,482 +248,297 @@ export default function AdminPages() {
             flexDirection: isMobile ? "row" : "column",
             gap: 6,
             overflowX: isMobile ? "auto" : "visible",
-          }}
-        >
-          {PAGE_SLUGS.map((slug) => {
-            const active = slug === activeSlug;
-            return (
-              <button
-                key={slug}
-                type="button"
-                onClick={() => setActiveSlug(slug)}
-                style={{
-                  flex: isMobile ? "0 0 auto" : "1 0 auto",
-                  padding: "7px 11px",
-                  borderRadius: 999,
-                  border: active
-                    ? "1px solid rgba(124,81,161,0.9)"
-                    : "1px solid rgba(148,122,173,0.35)",
-                  background: active ? "#f9f3ff" : "#fff",
-                  fontSize: 12,
-                  cursor: "pointer",
-                  color: active ? "#4a2a73" : "#4f3d5c",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {labelForSlug(slug)}
-              </button>
-            );
-          })}
-        </aside>
+          }}>
+            {PAGE_SLUGS.map((slug) => {
+              const active = slug === activeSlug;
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => { setActiveSlug(slug); setSaveError(null); }}
+                  style={{
+                    flex: isMobile ? "0 0 auto" : "1 0 auto",
+                    padding: "7px 11px",
+                    borderRadius: 999,
+                    border: active
+                      ? "1px solid rgba(124,81,161,0.9)"
+                      : "1px solid rgba(148,122,173,0.35)",
+                    background: active ? "#f9f3ff" : "#fff",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    color: active ? "#4a2a73" : "#4f3d5c",
+                    fontWeight: active ? 600 : 400,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {labelForSlug(slug)}
+                </button>
+              );
+            })}
+          </aside>
 
-        {/* RIGHT: Active page editor */}
-        <section
-          style={{
+          {/* RIGHT: editor */}
+          <section style={{
             borderRadius: 14,
             border: "1px solid rgba(148,122,173,0.25)",
             background: "#fff",
             padding: 14,
-          }}
-        >
-          {activeSlug === "home" && (
-            <HomeEditor
-              data={activePageData}
-              onChange={(field, value) =>
-                updateField("home", field, value)
-              }
-            />
-          )}
-          {activeSlug === "about" && (
-            <AboutEditor
-              data={activePageData}
-              onChange={(field, value) =>
-                updateField("about", field, value)
-              }
-            />
-          )}
-          {activeSlug === "contact" && (
-            <ContactEditor
-              data={activePageData}
-              onChange={(field, value) =>
-                updateField("contact", field, value)
-              }
-            />
-          )}
-          {activeSlug === "faq" && (
-            <FaqEditor
-              data={activePageData}
-              onChange={(field, value) =>
-                updateField("faq", field, value)
-              }
-            />
-          )}
-          {activeSlug === "legal" && (
-            <LegalEditor
-              data={activePageData}
-              onChange={(field, value) =>
-                updateField("legal", field, value)
-              }
-            />
-          )}
-        </section>
-      </div>
+          }}>
+            {activeSlug === "home"    && <HomeEditor    data={activePageData} onChange={(f, v) => updateField("home",    f, v)} />}
+            {activeSlug === "contact" && <ContactEditor data={activePageData} onChange={(f, v) => updateField("contact", f, v)} />}
+            {activeSlug === "faq"     && <FaqEditor     data={activePageData} onChange={(f, v) => updateField("faq",     f, v)} />}
+            {activeSlug === "legal"   && <LegalEditor   data={activePageData} onChange={(f, v) => updateField("legal",   f, v)} />}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------- Labels ---------- */
+// ─── STYLE HELPERS ────────────────────────────────────────────────────────────
+const fieldLabel = {
+  fontSize: 12,
+  color: "#4f3d5c",
+  display: "block",
+  fontWeight: 600,
+  marginBottom: 2,
+};
 
-function labelForSlug(slug) {
-  switch (slug) {
-    case "home":
-      return "Home";
-    case "about":
-      return "About";
-    case "contact":
-      return "Contact";
-    case "faq":
-      return "FAQ";
-    case "legal":
-      return "Legal";
-    default:
-      return slug;
-  }
-}
+const inputStyle = {
+  marginTop: 3,
+  width: "100%",
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(148,122,173,0.5)",
+  fontSize: 13,
+  boxSizing: "border-box",
+  outline: "none",
+};
 
-/* ---------- Editors ---------- */
+const areaStyle = (rows = 4) => ({
+  ...inputStyle,
+  resize: "vertical",
+  minHeight: rows * 22,
+  fontFamily: "inherit",
+});
 
-function fieldLabelStyle() {
-  return {
-    fontSize: 12,
-    color: "#4f3d5c",
-    display: "block",
-  };
-}
-
-function textInputStyle() {
-  return {
-    marginTop: 3,
-    width: "100%",
-    padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid rgba(148,122,173,0.5)",
-    fontSize: 13,
-    boxSizing: "border-box",
-  };
-}
-
-function textAreaStyle(rows = 4) {
-  return {
-    ...textInputStyle(),
-    resize: "vertical",
-    minHeight: rows * 20,
-  };
-}
-
-/* --- Home page editor --- */
-
-function HomeEditor({ data, onChange }) {
+function SectionHeader({ title, description }) {
   return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ display: "grid", gap: 10 }}
-    >
-      <div>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#3c274f",
-          }}
-        >
-          Home page
-        </h2>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            color: "#7a6989",
-          }}
-        >
-          Control the hero text that appears at the top of your homepage.
-        </p>
-      </div>
-
-      <label style={fieldLabelStyle()}>
-        Hero title
-        <input
-          type="text"
-          value={data.heroTitle || ""}
-          onChange={(e) => onChange("heroTitle", e.target.value)}
-          style={textInputStyle()}
-          placeholder="Main message at the top..."
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Hero subtitle
-        <textarea
-          value={data.heroSubtitle || ""}
-          onChange={(e) => onChange("heroSubtitle", e.target.value)}
-          style={textAreaStyle(3)}
-          placeholder="Short description under the main title..."
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Hero tagline / highlight
-        <input
-          type="text"
-          value={data.heroTagline || ""}
-          onChange={(e) => onChange("heroTagline", e.target.value)}
-          style={textInputStyle()}
-          placeholder="Small line to highlight a promotion or unique value..."
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Button label
-        <input
-          type="text"
-          value={data.heroButtonLabel || ""}
-          onChange={(e) =>
-            onChange("heroButtonLabel", e.target.value)
-          }
-          style={textInputStyle()}
-          placeholder="e.g. Shop now, View collection, Contact us"
-        />
-      </label>
-    </form>
+    <div style={{ marginBottom: 4 }}>
+      <h2 style={{ margin: 0, fontSize: 16, color: "#3c274f" }}>{title}</h2>
+      <p style={{ marginTop: 4, fontSize: 12, color: "#7a6989" }}>{description}</p>
+    </div>
   );
 }
 
-/* --- About page editor --- */
+function Field({ label, children }) {
+  return (
+    <label style={{ display: "grid", gap: 2 }}>
+      <span style={fieldLabel}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ─── PAGE EDITORS ─────────────────────────────────────────────────────────────
+function HomeEditor({ data, onChange }) {
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <SectionHeader
+        title="Home page"
+        description="Control the hero text that appears at the top of your homepage."
+      />
+      <Field label="Hero title">
+        <input type="text" value={data.heroTitle || ""} onChange={(e) => onChange("heroTitle", e.target.value)} style={inputStyle} placeholder="Main message at the top…" />
+      </Field>
+      <Field label="Hero subtitle">
+        <textarea value={data.heroSubtitle || ""} onChange={(e) => onChange("heroSubtitle", e.target.value)} style={areaStyle(3)} placeholder="Short description under the main title…" />
+      </Field>
+      <Field label="Hero tagline / highlight">
+        <input type="text" value={data.heroTagline || ""} onChange={(e) => onChange("heroTagline", e.target.value)} style={inputStyle} placeholder="Small line to highlight a promotion…" />
+      </Field>
+      <Field label="Button label">
+        <input type="text" value={data.heroButtonLabel || ""} onChange={(e) => onChange("heroButtonLabel", e.target.value)} style={inputStyle} placeholder="e.g. Shop now" />
+      </Field>
+    </div>
+  );
+}
 
 function AboutEditor({ data, onChange }) {
   return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ display: "grid", gap: 10 }}
-    >
-      <div>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#3c274f",
-          }}
-        >
-          About page
-        </h2>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            color: "#7a6989",
-          }}
-        >
-          Share your story, your process, and what makes Utopia by Rim
-          special.
-        </p>
-      </div>
-
-      <label style={fieldLabelStyle()}>
-        Title
-        <input
-          type="text"
-          value={data.title || ""}
-          onChange={(e) => onChange("title", e.target.value)}
-          style={textInputStyle()}
-          placeholder="About Utopia by Rim"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Body
-        <textarea
-          value={data.body || ""}
-          onChange={(e) => onChange("body", e.target.value)}
-          style={textAreaStyle(8)}
-          placeholder="Write your about text here..."
-        />
-      </label>
-    </form>
+    <div style={{ display: "grid", gap: 12 }}>
+      <SectionHeader
+        title="About page"
+        description="Share your story, your process, and what makes Utopia by Rim special."
+      />
+      <Field label="Title">
+        <input type="text" value={data.title || ""} onChange={(e) => onChange("title", e.target.value)} style={inputStyle} placeholder="About Utopia by Rim" />
+      </Field>
+      <Field label="Body">
+        <textarea value={data.body || ""} onChange={(e) => onChange("body", e.target.value)} style={areaStyle(10)} placeholder="Write your about text here…" />
+      </Field>
+    </div>
   );
 }
-
-/* --- Contact page editor --- */
 
 function ContactEditor({ data, onChange }) {
   return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ display: "grid", gap: 10 }}
-    >
-      <div>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#3c274f",
-          }}
-        >
-          Contact page
-        </h2>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            color: "#7a6989",
-          }}
-        >
-          Update your public contact info. This is what customers see on
-          the contact section/page.
-        </p>
-      </div>
-
-      <label style={fieldLabelStyle()}>
-        Title
-        <input
-          type="text"
-          value={data.title || ""}
-          onChange={(e) => onChange("title", e.target.value)}
-          style={textInputStyle()}
-          placeholder="Contact"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Email
-        <input
-          type="email"
-          value={data.email || ""}
-          onChange={(e) => onChange("email", e.target.value)}
-          style={textInputStyle()}
-          placeholder="hello@utopiabyrim.com"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Phone
-        <input
-          type="text"
-          value={data.phone || ""}
-          onChange={(e) => onChange("phone", e.target.value)}
-          style={textInputStyle()}
-          placeholder="+961 70 000 000"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        WhatsApp
-        <input
-          type="text"
-          value={data.whatsapp || ""}
-          onChange={(e) => onChange("whatsapp", e.target.value)}
-          style={textInputStyle()}
-          placeholder="+961 70 000 000"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Address
-        <input
-          type="text"
-          value={data.address || ""}
-          onChange={(e) => onChange("address", e.target.value)}
-          style={textInputStyle()}
-          placeholder="Beirut, Lebanon"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Note / extra info
-        <textarea
-          value={data.note || ""}
-          onChange={(e) => onChange("note", e.target.value)}
-          style={textAreaStyle(4)}
-          placeholder="Extra instructions, working hours, etc."
-        />
-      </label>
-    </form>
+    <div style={{ display: "grid", gap: 12 }}>
+      <SectionHeader
+        title="Contact page"
+        description="Update your public contact info. This is what customers see."
+      />
+      <Field label="Title">
+        <input type="text" value={data.title || ""} onChange={(e) => onChange("title", e.target.value)} style={inputStyle} placeholder="Contact" />
+      </Field>
+      <Field label="Email">
+        <input type="email" value={data.email || ""} onChange={(e) => onChange("email", e.target.value)} style={inputStyle} placeholder="hello@utopiabyrim.com" />
+      </Field>
+      <Field label="Phone">
+        <input type="text" value={data.phone || ""} onChange={(e) => onChange("phone", e.target.value)} style={inputStyle} placeholder="+961 70 000 000" />
+      </Field>
+      <Field label="WhatsApp">
+        <input type="text" value={data.whatsapp || ""} onChange={(e) => onChange("whatsapp", e.target.value)} style={inputStyle} placeholder="+961 70 000 000" />
+      </Field>
+      <Field label="Address">
+        <input type="text" value={data.address || ""} onChange={(e) => onChange("address", e.target.value)} style={inputStyle} placeholder="Beirut, Lebanon" />
+      </Field>
+      <Field label="Note / extra info">
+        <textarea value={data.note || ""} onChange={(e) => onChange("note", e.target.value)} style={areaStyle(4)} placeholder="Extra instructions, working hours, etc." />
+      </Field>
+    </div>
   );
 }
 
-/* --- FAQ page editor --- */
-
 function FaqEditor({ data, onChange }) {
-  return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ display: "grid", gap: 10 }}
-    >
-      <div>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#3c274f",
-          }}
-        >
-          FAQ page
-        </h2>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            color: "#7a6989",
-          }}
-        >
-          Answer common questions to reduce DMs and make customers feel
-          safe before ordering.
-        </p>
-      </div>
+  // sections: [{ title, id, items: [{ q, a }] }]
+  const sections = Array.isArray(data.sections) && data.sections.length
+    ? data.sections
+    : [
+        { title: "Frequently Asked Questions", id: "faq", items: [{ q: "", a: "" }] },
+        { title: "Shipping", id: "shipping", items: [{ q: "", a: "" }] },
+        { title: "Returns & Refunds", id: "returns", items: [{ q: "", a: "" }] },
+      ];
 
-      <label style={fieldLabelStyle()}>
-        Intro text
+  const updateSections = (updated) => onChange("sections", updated);
+
+  const updateItem = (sIdx, iIdx, field, value) => {
+    const next = sections.map((s, si) =>
+      si !== sIdx ? s : {
+        ...s,
+        items: s.items.map((it, ii) => ii !== iIdx ? it : { ...it, [field]: value }),
+      }
+    );
+    updateSections(next);
+  };
+
+  const addItem = (sIdx) => {
+    const next = sections.map((s, si) =>
+      si !== sIdx ? s : { ...s, items: [...s.items, { q: "", a: "" }] }
+    );
+    updateSections(next);
+  };
+
+  const removeItem = (sIdx, iIdx) => {
+    const next = sections.map((s, si) =>
+      si !== sIdx ? s : { ...s, items: s.items.filter((_, ii) => ii !== iIdx) }
+    );
+    updateSections(next);
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <SectionHeader
+        title="FAQ page"
+        description="Edit questions and answers for each section. Changes save to the database."
+      />
+
+      <Field label="Intro text">
         <textarea
           value={data.intro || ""}
           onChange={(e) => onChange("intro", e.target.value)}
-          style={textAreaStyle(3)}
-          placeholder="Short intro about your FAQ..."
+          style={areaStyle(2)}
+          placeholder="Short intro shown on the FAQ page…"
         />
-      </label>
+      </Field>
 
-      <label style={fieldLabelStyle()}>
-        FAQ content
-        <textarea
-          value={data.content || ""}
-          onChange={(e) => onChange("content", e.target.value)}
-          style={textAreaStyle(10)}
-          placeholder={`Q: Example question?\nA: Example answer.\n\nQ: Another question?\nA: Another answer.`}
-        />
-        <span
-          style={{
-            marginTop: 3,
-            display: "block",
-            fontSize: 11,
-            color: "#a38fb5",
-          }}
-        >
-          You can write your questions and answers in plain text. Later
-          you can render this nicely on the public FAQ page.
-        </span>
-      </label>
-    </form>
+      {sections.map((section, sIdx) => (
+        <div key={section.id} style={{
+          border: "1px solid rgba(148,122,173,0.25)",
+          borderRadius: 12, padding: 12, display: "grid", gap: 10,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#3c274f" }}>
+            {section.title}
+          </div>
+
+          {section.items.map((item, iIdx) => (
+            <div key={iIdx} style={{
+              background: "#faf6ff", borderRadius: 10,
+              padding: 10, display: "grid", gap: 6,
+              border: "1px solid rgba(148,122,173,0.15)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#7a6989", fontWeight: 600 }}>Q&A #{iIdx + 1}</span>
+                {section.items.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeItem(sIdx, iIdx)}
+                    style={{
+                      fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                      border: "1px solid rgba(244,67,54,0.4)", background: "transparent",
+                      color: "#b71c1c", cursor: "pointer",
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                value={item.q}
+                onChange={(e) => updateItem(sIdx, iIdx, "q", e.target.value)}
+                placeholder="Question…"
+                style={{ ...inputStyle, fontWeight: 600 }}
+              />
+              <textarea
+                value={item.a}
+                onChange={(e) => updateItem(sIdx, iIdx, "a", e.target.value)}
+                placeholder="Answer…"
+                style={areaStyle(2)}
+              />
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => addItem(sIdx)}
+            style={{
+              fontSize: 12, padding: "6px 12px", borderRadius: 999,
+              border: "1px dashed rgba(124,81,161,0.5)", background: "transparent",
+              color: "#4a2a73", cursor: "pointer", fontWeight: 600,
+            }}
+          >
+            + Add question
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
-/* --- Legal page editor --- */
-
 function LegalEditor({ data, onChange }) {
   return (
-    <form
-      onSubmit={(e) => e.preventDefault()}
-      style={{ display: "grid", gap: 10 }}
-    >
-      <div>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            color: "#3c274f",
-          }}
-        >
-          Legal / Terms page
-        </h2>
-        <p
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            color: "#7a6989",
-          }}
-        >
-          Add your store policies: returns, refunds, cancellations,
-          payment terms, and delivery rules.
-        </p>
-      </div>
-
-      <label style={fieldLabelStyle()}>
-        Title
-        <input
-          type="text"
-          value={data.title || ""}
-          onChange={(e) => onChange("title", e.target.value)}
-          style={textInputStyle()}
-          placeholder="Terms & Conditions"
-        />
-      </label>
-
-      <label style={fieldLabelStyle()}>
-        Content
-        <textarea
-          value={data.content || ""}
-          onChange={(e) => onChange("content", e.target.value)}
-          style={textAreaStyle(12)}
-          placeholder="Write your terms and policies here..."
-        />
-      </label>
-    </form>
+    <div style={{ display: "grid", gap: 12 }}>
+      <SectionHeader
+        title="Legal / Terms page"
+        description="Add your store policies: returns, refunds, cancellations, payment terms, and delivery rules."
+      />
+      <Field label="Title">
+        <input type="text" value={data.title || ""} onChange={(e) => onChange("title", e.target.value)} style={inputStyle} placeholder="Terms & Conditions" />
+      </Field>
+      <Field label="Content">
+        <textarea value={data.content || ""} onChange={(e) => onChange("content", e.target.value)} style={areaStyle(14)} placeholder="Write your terms and policies here…" />
+      </Field>
+    </div>
   );
 }
