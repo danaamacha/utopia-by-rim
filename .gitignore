@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+build/
+
+# environment & secrets — never commit
+.env
+.env.*
+env.txt
+*.pem
+*.key
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test output
+coverage/
+.nyc_output/
+
+# temp
+.tmp/
+.temp/

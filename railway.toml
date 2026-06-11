@@ -1,0 +1,9 @@
+[project]
+name = "utopia-backend"
+
+[build]
+root = "backend"
+buildCommand = "npm install && npm run build"
+
+[start]
+cmd = "npm run start"
