@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import useBreakpoint from "../hooks/useBreakpoint";
 import { colors } from "../theme";
+import { useCart } from "../cart/CartContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
-const LS_KEY = "cart_v1";
 
 function getImage(product) {
   const primary = product.images?.find((i) => i.isPrimary) || product.images?.[0];
@@ -22,14 +22,6 @@ function getAllImages(product) {
     .map((i) => (i.url.startsWith("http") ? i.url : `${API_BASE.replace("/api", "")}${i.url}`));
 }
 
-function readCart() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-function writeCart(items) { localStorage.setItem(LS_KEY, JSON.stringify(items)); }
 function optionKey(obj) {
   return Object.keys(obj || {}).sort().map((k) => `${k}:${obj[k]}`).join("|");
 }
@@ -45,6 +37,7 @@ export default function ProductDetails() {
   const bp = useBreakpoint();
   const isMobile = bp.xs || bp.sm;
 
+  const { add: addToCart } = useCart();
   const [product, setProduct] = useState(null);
   const [allProducts, setAllProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -105,7 +98,7 @@ export default function ProductDetails() {
   }, [product, allProducts, isMobile]);
   const relCols = bp.xs ? 1 : bp.sm ? 2 : 3;
 
-  const onAddToCart = () => {
+  const onAddToCart = async () => {
     if (!product) return;
     if (missingRequired.length > 0) {
       setShowOptionsError(true);
@@ -114,22 +107,14 @@ export default function ProductDetails() {
     }
     const optKey = optionKey(sel);
     const lineId = optKey ? `${product.id}__${optKey}` : product.id;
-    const item = {
+    const ok = await addToCart(product, qty, {
       id: lineId,
-      productId: product.id,
-      name: product.name,
       image: mainImg,
       price: finalPrice,
       compareAt: hasSale ? Number(product.price) : undefined,
-      qty,
-      slug: product.slug,
       options: sel,
-    };
-    const items = readCart();
-    const existing = items.find((x) => x.id === lineId);
-    if (existing) { existing.qty = Math.max(1, (existing.qty || 1) + qty); }
-    else { items.push(item); }
-    writeCart(items);
+    });
+    if (!ok) { setAddedMsg("Could not add to cart"); setTimeout(() => setAddedMsg(""), 2500); return; }
     setAddedMsg("Added to cart ✓");
     setTimeout(() => setAddedMsg(""), 2500);
   };

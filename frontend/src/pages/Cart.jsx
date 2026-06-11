@@ -1,30 +1,9 @@
 // frontend/src/pages/Cart.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { colors } from "../theme";
 import useBreakpoint from "../hooks/useBreakpoint";
-
-/* ---------------- Local storage helpers ---------------- */
-const LS_KEY = "cart_v1";
-
-function readCart() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    // guard
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((x) => x && x.id && x.name && typeof x.price === "number")
-      .map((x) => ({ ...x, qty: Math.max(1, Number(x.qty || 1)) }));
-  } catch {
-    return [];
-  }
-}
-
-function writeCart(items) {
-  localStorage.setItem(LS_KEY, JSON.stringify(items));
-}
+import { useCart } from "../cart/CartContext";
 
 function currency(n) {
   return `$${Number(n || 0).toFixed(2)}`;
@@ -36,21 +15,7 @@ export default function Cart() {
   const isMobile = bp.xs || bp.sm;
   const navigate = useNavigate();
 
-  const [items, setItems] = useState(() => readCart());
-
-  // Keep in sync with other tabs/windows
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === LS_KEY) setItems(readCart());
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  // Persist on change
-  useEffect(() => {
-    writeCart(items);
-  }, [items]);
+  const { items, loading, error: cartError, updateQty, remove, clearAll } = useCart();
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((s, it) => s + it.price * it.qty, 0);
@@ -64,18 +29,10 @@ export default function Cart() {
     return { subtotal, savings, shipping, grand };
   }, [items]);
 
-  const inc = (id) => {
-    setItems((arr) => arr.map((it) => (it.id === id ? { ...it, qty: it.qty + 1 } : it)));
-  };
-  const dec = (id) => {
-    setItems((arr) =>
-      arr
-        .map((it) => (it.id === id ? { ...it, qty: Math.max(1, it.qty - 1) } : it))
-        .filter(Boolean)
-    );
-  };
-  const removeItem = (id) => setItems((arr) => arr.filter((it) => it.id !== id));
-  const clear = () => setItems([]);
+  const inc = (it) => updateQty(it, (it.qty || 1) + 1);
+  const dec = (it) => updateQty(it, Math.max(1, (it.qty || 1) - 1));
+  const removeItem = (it) => remove(it);
+  const clear = () => clearAll();
 
   return (
     <main>
@@ -163,8 +120,16 @@ export default function Cart() {
               )}
             </div>
 
-            {/* Empty state */}
-            {items.length === 0 ? (
+            {cartError && (
+              <div style={{ padding: "10px 16px", color: "#a33", fontSize: 13 }}>{cartError}</div>
+            )}
+
+            {/* Empty / loading state */}
+            {loading ? (
+              <div style={{ padding: isMobile ? 16 : 24, textAlign: "center", color: "#6c5a80" }}>
+                Loading your cart…
+              </div>
+            ) : items.length === 0 ? (
               <div style={{ padding: isMobile ? 16 : 24, textAlign: "center" }}>
                 <p style={{ margin: 0, color: "#6c5a80" }}>Your cart is empty.</p>
                 <div style={{ height: 10 }} />
@@ -228,7 +193,7 @@ export default function Cart() {
                         {/* Qty control */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <button
-                            onClick={() => dec(it.id)}
+                            onClick={() => dec(it)}
                             aria-label="Decrease"
                             style={qtyBtnStyle}
                           >
@@ -236,7 +201,7 @@ export default function Cart() {
                           </button>
                           <div style={{ minWidth: 34, textAlign: "center", fontWeight: 700 }}>{it.qty}</div>
                           <button
-                            onClick={() => inc(it.id)}
+                            onClick={() => inc(it)}
                             aria-label="Increase"
                             style={qtyBtnStyle}
                           >
@@ -244,7 +209,7 @@ export default function Cart() {
                           </button>
 
                           <button
-                            onClick={() => removeItem(it.id)}
+                            onClick={() => removeItem(it)}
                             style={{
                               marginLeft: 10,
                               border: "none",

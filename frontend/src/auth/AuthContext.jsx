@@ -29,15 +29,11 @@ function clearMe() {
   localStorage.removeItem(LS_USER_KEY);
   localStorage.removeItem(LS_TOKEN_KEY);
 }
+// Logout clears local session state only — the user's backend cart is
+// preserved and restored on next login (CartContext handles merge/fetch).
 function clearCartData() {
   localStorage.removeItem("cart_v1");
   localStorage.removeItem("last_order");
-}
-// Clear the cart when a different account signs in on the same browser;
-// keep it when the same user re-authenticates or a guest logs in.
-function clearCartIfUserChanged(newUserId) {
-  const prev = readMe();
-  if (prev && prev.id && prev.id !== newUserId) clearCartData();
 }
 
 export function getToken() {
@@ -65,7 +61,6 @@ export default function AuthProvider({ children }) {
         }
 
         const data = await res.json();
-        clearCartIfUserChanged(data.user.id);
         localStorage.setItem(LS_TOKEN_KEY, data.token);
 
         const me = {
@@ -97,7 +92,6 @@ export default function AuthProvider({ children }) {
         }
 
         const data = await res.json();
-        clearCartIfUserChanged(data.user.id);
         localStorage.setItem(LS_TOKEN_KEY, data.token);
 
         const me = {

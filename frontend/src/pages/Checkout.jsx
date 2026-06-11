@@ -1,24 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import useBreakpoint from "../hooks/useBreakpoint";
 import { colors } from "../theme";
 import { useAuth, getToken } from "../auth/AuthContext";
+import { useCart } from "../cart/CartContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
-
-/** --------- Utilities ---------- */
-const LS_CART_KEY = "cart_v1";
-
-function readCart() {
-  try {
-    const raw = localStorage.getItem(LS_CART_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_) {
-    return [];
-  }
-}
 
 function formatMoney(v) {
   return `$${v.toFixed(2)}`;
@@ -30,7 +17,7 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth() || {};
 
-  const [cart, setCart] = useState(() => readCart());
+  const { items: cart, updateQty: cartUpdateQty, remove: cartRemove, reset: cartReset } = useCart();
 
   // Contact + Address
   const [email, setEmail] = useState("");
@@ -96,23 +83,13 @@ export default function Checkout() {
     }
   }
 
-  function updateQty(id, qty) {
-    setCart((prev) =>
-      prev
-        .map((it) => (it.id === id ? { ...it, qty: Math.max(1, qty) } : it))
-        .filter(Boolean)
-    );
+  function updateQty(item, qty) {
+    cartUpdateQty(item, Math.max(1, qty));
   }
 
-  function removeItem(id) {
-    setCart((prev) => prev.filter((it) => it.id !== id));
+  function removeItem(item) {
+    cartRemove(item);
   }
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_CART_KEY, JSON.stringify(cart));
-    } catch (_) {}
-  }, [cart]);
 
   function validate() {
     const e = {};
@@ -138,19 +115,8 @@ export default function Checkout() {
       const token = getToken();
       const authHeader = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-      // 1. Clear server cart so it mirrors exactly what the customer sees,
-      //    then sync each cart item (server addToCart increments existing rows)
-      await fetch(`${API_BASE}/cart`, { method: "DELETE", headers: authHeader });
-      for (const it of cart) {
-        if (!it.productId) continue; // skip legacy items without real UUID
-        await fetch(`${API_BASE}/cart/items`, {
-          method: "POST",
-          headers: authHeader,
-          body: JSON.stringify({ productId: it.productId, quantity: it.qty || 1 }),
-        });
-      }
-
-      // 2. Place order
+      // The server cart is the source of truth for logged-in users
+      // (CartContext keeps it in sync), so checkout reads it directly.
       const orderRes = await fetch(`${API_BASE}/orders/checkout`, {
         method: "POST",
         headers: authHeader,
@@ -184,7 +150,7 @@ export default function Checkout() {
         items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, compareAt: it.compareAt, image: it.image, qty: it.qty || 1 })),
       };
       try { localStorage.setItem("last_order", JSON.stringify(snapshot)); } catch {}
-      try { localStorage.removeItem(LS_CART_KEY); } catch {}
+      cartReset();
       navigate("/order-confirmation", { state: snapshot });
 
     } catch {
@@ -433,7 +399,7 @@ export default function Checkout() {
                         {/* qty controls */}
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                           <button
-                            onClick={() => updateQty(it.id, (it.qty || 1) - 1)}
+                            onClick={() => updateQty(it, (it.qty || 1) - 1)}
                             style={qtyBtn}
                             aria-label="Decrease quantity"
                           >
@@ -441,14 +407,14 @@ export default function Checkout() {
                           </button>
                           <div style={{ minWidth: 30, textAlign: "center", fontWeight: 800 }}>{it.qty || 1}</div>
                           <button
-                            onClick={() => updateQty(it.id, (it.qty || 1) + 1)}
+                            onClick={() => updateQty(it, (it.qty || 1) + 1)}
                             style={qtyBtn}
                             aria-label="Increase quantity"
                           >
                             +
                           </button>
                           <button
-                            onClick={() => removeItem(it.id)}
+                            onClick={() => removeItem(it)}
                             style={{ marginLeft: 8, ...linkBtn }}
                           >
                             Remove

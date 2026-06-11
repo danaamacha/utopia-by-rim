@@ -22,6 +22,7 @@ import NotFound from "./pages/NotFound";
 
 /* ---------------- Auth & Account ---------------- */
 import AuthProvider from "./auth/AuthContext";
+import CartProvider from "./cart/CartContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./auth/pages/Login";
 import Register from "./auth/pages/Register";
@@ -61,6 +62,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+      <CartProvider>
       <div
         style={{
           fontFamily: fonts.base,
@@ -164,6 +166,7 @@ export default function App() {
         <Footer />
         <ScrollTopButton />
       </div>
+      </CartProvider>
     </AuthProvider>
   );
 }

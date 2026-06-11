@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { colors } from "../theme";
 import useBreakpoint from "../hooks/useBreakpoint";
+import { useCart } from "../cart/CartContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
-const LS_CART_KEY = "cart_v1";
 
 function getImage(product) {
   const primary = product.images?.find((i) => i.isPrimary) || product.images?.[0];
@@ -12,13 +12,6 @@ function getImage(product) {
     return primary.url.startsWith("http") ? primary.url : `${API_BASE.replace("/api", "")}${primary.url}`;
   }
   return "/best/best1.jpg";
-}
-
-function readCart() {
-  try {
-    const raw = localStorage.getItem(LS_CART_KEY);
-    return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
-  } catch { return []; }
 }
 
 function AnimatedCard({ index, children }) {
@@ -102,7 +95,7 @@ export default function Shop() {
   const [page, setPage] = useState(1);
   const [addedId, setAddedId] = useState(null);
 
-  const [cart, setCart] = useState(readCart);
+  const { add: addToCart, count: cartCount } = useCart();
 
   useEffect(() => {
     setLoading(true);
@@ -120,25 +113,9 @@ export default function Shop() {
     return ["All", ...Array.from(cats)];
   }, [products]);
 
-  const handleAdd = (item) => {
-    const arr = readCart();
-    const idx = arr.findIndex((x) => x.productId === item.id);
-    if (idx >= 0) {
-      arr[idx].qty = (arr[idx].qty || 1) + 1;
-    } else {
-      arr.push({
-        id: item.id,
-        productId: item.id,
-        name: item.name,
-        price: item.salePrice != null ? Number(item.salePrice) : Number(item.price),
-        compareAt: item.salePrice != null ? Number(item.price) : undefined,
-        image: getImage(item),
-        slug: item.slug,
-        qty: 1,
-      });
-    }
-    localStorage.setItem(LS_CART_KEY, JSON.stringify(arr));
-    setCart(arr);
+  const handleAdd = async (item) => {
+    const ok = await addToCart(item, 1);
+    if (!ok) return;
     setAddedId(item.id);
     setTimeout(() => setAddedId(null), 1500);
     try { window.navigator.vibrate?.(10); } catch {}
@@ -166,7 +143,6 @@ export default function Shop() {
 
   const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
   const pageItems = visible.slice((page - 1) * pageSize, page * pageSize);
-  const cartCount = cart.reduce((s, i) => s + (i.qty || 1), 0);
 
   return (
     <main>

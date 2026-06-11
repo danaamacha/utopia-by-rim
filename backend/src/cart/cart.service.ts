@@ -102,7 +102,7 @@ export class CartService {
         );
       }
       existingItem.quantity = newQuantity;
-      existingItem.unitPrice = Number(product.price);
+      existingItem.unitPrice = Number(product.salePrice ?? product.price);
       await this.cartItemRepo.save(existingItem);
     } else {
       // Create new cart item
@@ -110,7 +110,7 @@ export class CartService {
         cart,
         product,
         quantity: dto.quantity,
-        unitPrice: Number(product.price),
+        unitPrice: Number(product.salePrice ?? product.price),
       });
       await this.cartItemRepo.save(cartItem);
     }
