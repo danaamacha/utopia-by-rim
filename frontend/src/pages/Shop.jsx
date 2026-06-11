@@ -109,7 +109,7 @@ export default function Shop() {
     setError("");
     fetch(`${API_BASE}/products`)
       .then((r) => { if (!r.ok) throw new Error("Failed to load products"); return r.json(); })
-      .then((data) => { setProducts(Array.isArray(data) ? data : data.products || []); })
+      .then((data) => { setProducts(Array.isArray(data) ? data : data.data || []); })
       .catch(() => setError("Could not load products. Please try again."))
       .finally(() => setLoading(false));
   }, []);

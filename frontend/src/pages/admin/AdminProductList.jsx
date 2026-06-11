@@ -41,7 +41,7 @@ export default function AdminProductList() {
       });
       if (!res.ok) throw new Error("Failed to load products");
       const data = await res.json();
-      setProducts(Array.isArray(data) ? data : data.products || []);
+      setProducts(Array.isArray(data) ? data : data.data || []);
     } catch (e) {
       setError(e.message || "Error loading products");
     } finally {

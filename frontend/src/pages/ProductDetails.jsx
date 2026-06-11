@@ -72,7 +72,7 @@ export default function ProductDetails() {
       .then(([prod, all]) => {
         setProduct(prod);
         setMainImg(getImage(prod));
-        setAllProducts(Array.isArray(all) ? all : all.products || []);
+        setAllProducts(Array.isArray(all) ? all : all.data || []);
       })
       .catch((e) => setError(e.message === "not_found" ? "Product not found." : "Failed to load product."))
       .finally(() => setLoading(false));

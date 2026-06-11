@@ -25,7 +25,7 @@ export default function Orders() {
         return res.json();
       })
       .then((data) => {
-        const arr = Array.isArray(data) ? data : data.orders || [];
+        const arr = Array.isArray(data) ? data : data.data || [];
         arr.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setOrders(arr);
       })
