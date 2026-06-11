@@ -1,9 +1,16 @@
-import { IsString, IsOptional, IsInt, IsBoolean, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsInt, IsBoolean, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 
 export class CreateProductImageDto {
+  @Transform(trim)
   @IsString()
+  @IsNotEmpty()
   url: string;
 
+  @Transform(trim)
   @IsOptional()
   @IsString()
   altText?: string;
@@ -17,8 +24,3 @@ export class CreateProductImageDto {
   @IsBoolean()
   isPrimary?: boolean;
 }
-
-
-
-
-

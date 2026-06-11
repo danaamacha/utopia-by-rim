@@ -1,5 +1,6 @@
 import {
   IsString,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsBoolean,
@@ -8,14 +9,25 @@ import {
   Min,
   IsObject,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
+const trimLower = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim().toLowerCase() : value;
 
 export class CreateProductDto {
+  @Transform(trim)
   @IsString()
+  @IsNotEmpty()
   name: string;
 
+  @Transform(trimLower)
   @IsString()
+  @IsNotEmpty()
   slug: string;
 
+  @Transform(trim)
   @IsOptional()
   @IsString()
   description?: string;
@@ -31,10 +43,12 @@ export class CreateProductDto {
   @Min(0)
   salePrice?: number;
 
+  @Transform(trim)
   @IsOptional()
   @IsString()
   currency?: string;
 
+  @Transform(trim)
   @IsOptional()
   @IsString()
   sku?: string;
