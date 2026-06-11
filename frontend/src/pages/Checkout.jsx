@@ -138,7 +138,9 @@ export default function Checkout() {
       const token = getToken();
       const authHeader = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-      // 1. Sync each cart item to server cart
+      // 1. Clear server cart so it mirrors exactly what the customer sees,
+      //    then sync each cart item (server addToCart increments existing rows)
+      await fetch(`${API_BASE}/cart`, { method: "DELETE", headers: authHeader });
       for (const it of cart) {
         if (!it.productId) continue; // skip legacy items without real UUID
         await fetch(`${API_BASE}/cart/items`, {
