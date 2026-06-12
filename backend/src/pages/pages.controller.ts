@@ -5,13 +5,13 @@ import {
   Get,
   Param,
   Patch,
+  UseGuards,
 } from '@nestjs/common';
 import { PagesService } from './pages.service';
 import { UpdatePageDto } from './dto/update-page.dto';
-
-// Uncomment when your admin guard is ready:
-// import { AdminGuard } from '../auth/admin.guard';
-// @UseGuards(AdminGuard)
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller()
 export class PagesController {
@@ -40,6 +40,8 @@ export class PagesController {
    * PATCH /api/admin/pages/:slug
    * Body: { content: { ...fields } }
    */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner', 'admin')
   @Patch('admin/pages/:slug')
   upsertPage(
     @Param('slug') slug: string,
