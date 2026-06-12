@@ -140,6 +140,7 @@ export class OrdersService {
       let discountAmount = 0;
       let discountId: string | null = null;
       let appliedCode: string | null = null;
+      let freeShipping = false;
 
       if (dto.discountCode?.trim()) {
         const result = await this.discountsService.validateCode(
@@ -149,9 +150,18 @@ export class OrdersService {
         discountAmount = result.discountAmount;
         discountId     = result.discountId;
         appliedCode    = result.code;
+        freeShipping   = result.freeShipping;
       }
 
-      const total = Math.max(0, subtotal - discountAmount);
+      // ─── Shipping (flat rates, must mirror Checkout.jsx) ──────────────────
+      const shippingMethod = dto.shippingMethod ?? 'standard';
+      const shippingCost = freeShipping
+        ? 0
+        : shippingMethod === 'express'
+        ? 12
+        : 6;
+
+      const total = Math.max(0, subtotal - discountAmount) + shippingCost;
 
       // Create and save the order
       const newOrder = manager.create(Order, {
@@ -173,6 +183,8 @@ export class OrdersService {
         postalCode:    dto.postalCode   ?? undefined,
         discountCode:   appliedCode     ?? undefined,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
+        shippingMethod,
+        shippingCost,
       });
 
       const savedOrder = await manager.save(Order, newOrder);

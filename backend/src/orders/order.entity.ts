@@ -95,6 +95,13 @@ export class Order {
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   discountAmount: number | null;
 
+  // ─── Shipping ─────────────────────────────────────────────────────────────
+  @Column({ type: 'varchar', nullable: true })
+  shippingMethod: string | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  shippingCost: number;
+
   // ─── Relations ────────────────────────────────────────────────────────────
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'userId' })

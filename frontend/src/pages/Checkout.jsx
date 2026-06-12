@@ -131,6 +131,7 @@ export default function Checkout() {
           postalCode: zip || undefined,
           paymentMethod: payment === "cod" ? "COD" : "MANUAL",
           discountCode: promoApplied?.code || undefined,
+          shippingMethod: shipping,
         }),
       });
 

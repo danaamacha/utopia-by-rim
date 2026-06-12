@@ -1,5 +1,5 @@
 // backend/src/orders/dto/checkout.dto.ts
-import { IsEnum, IsNotEmpty, IsOptional, IsString, Length } from 'class-validator';
+import { IsEnum, IsIn, IsNotEmpty, IsOptional, IsString, Length } from 'class-validator';
 import { PaymentMethodValues } from '../order.entity';
 import type { PaymentMethod } from '../order.entity';
 
@@ -48,4 +48,9 @@ export class CheckoutDto {
   @IsString()
   @IsOptional()
   discountCode?: string;
+
+  // ─── Shipping method (optional, defaults to standard) ────────────────────
+  @IsOptional()
+  @IsIn(['standard', 'express'])
+  shippingMethod?: 'standard' | 'express';
 }

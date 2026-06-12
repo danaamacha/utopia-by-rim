@@ -40,7 +40,10 @@ import { UploadsModule } from '../uploads/uploads.module';
           type: 'postgres',
           url: databaseUrl,
           autoLoadEntities: true,
-          synchronize: true, // dev only
+          // Schema auto-sync is opt-in: set DB_SYNCHRONIZE=true in local .env
+          // for development. Never set it in production — schema changes there
+          // are applied via explicit SQL.
+          synchronize: config.get<string>('DB_SYNCHRONIZE') === 'true',
           ssl: databaseUrl?.includes('supabase')
             ? { rejectUnauthorized: false }
             : false,
