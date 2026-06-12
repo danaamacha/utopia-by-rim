@@ -18,8 +18,7 @@ import { CustomersModule } from './customer/customers.module';
 import { PagesModule } from './pages/pages.module';
 import { DiscountsModule } from './Disscount/discounts.module'; // ✅ ADD
 import { DashboardModule } from './dashboard/dashboard.module'; // ✅ ADD
-
-import { UploadsModule } from '../uploads/uploads.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -51,7 +50,7 @@ import { UploadsModule } from '../uploads/uploads.module';
       },
     }),
 
-    UploadsModule,
+    StorageModule,
     UsersModule,
     AuthModule,
     CategoriesModule,

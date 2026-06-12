@@ -5,6 +5,7 @@ import { ProductImage } from './product-image.entity';
 import { Product } from '../products/product.entity';
 import { CreateProductImageDto } from './dto/create-product-image.dto';
 import { UpdateProductImageDto } from './dto/update-product-image.dto';
+import { StorageService } from '../storage/storage.service';
 
 @Injectable()
 export class MediaService {
@@ -13,6 +14,7 @@ export class MediaService {
     private readonly imageRepo: Repository<ProductImage>,
     @InjectRepository(Product)
     private readonly productRepo: Repository<Product>,
+    private readonly storageService: StorageService,
   ) {}
 
   async findAllByProduct(productId: string): Promise<ProductImage[]> {
@@ -95,7 +97,12 @@ export class MediaService {
       throw new NotFoundException('Product image not found');
     }
 
+    const url = image.url;
     await this.imageRepo.remove(image);
+
+    // Best-effort physical cleanup for Supabase-hosted files
+    // (legacy /uploads/ paths are ignored by deleteByPublicUrl).
+    if (url) await this.storageService.deleteByPublicUrl(url);
   }
 }
 

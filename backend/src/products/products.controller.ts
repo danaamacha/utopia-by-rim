@@ -13,11 +13,10 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import * as path from 'path';
-import * as fs from 'fs';
+import { memoryStorage } from 'multer';
 
 import { ProductsService } from './products.service';
+import { StorageService } from '../storage/storage.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
@@ -28,10 +27,6 @@ import { RolesGuard } from '../auth/roles.guard';
 // -------------------------
 // Helpers
 // -------------------------
-function ensureDir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
 function toBool(v: any) {
   if (typeof v === 'boolean') return v;
   const s = String(v ?? '').toLowerCase().trim();
@@ -45,7 +40,10 @@ function toInt(v: any, fallback = 0) {
 
 @Controller()
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly storageService: StorageService,
+  ) {}
 
   // =========================
   // PUBLIC
@@ -150,24 +148,7 @@ export class ProductsController {
   @Post('admin/products/:id/images')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (req, file, cb) => {
-          const dir = path.join(process.cwd(), 'uploads', 'products');
-          ensureDir(dir);
-          cb(null, dir);
-        },
-        filename: (req, file, cb) => {
-          const ext = path.extname(file.originalname || '').toLowerCase();
-          const allowedExt = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
-          const safeExt = allowedExt.has(ext) ? ext : '';
-
-          const safeName = `${Date.now()}-${Math.round(
-            Math.random() * 1e9,
-          )}${safeExt}`;
-
-          cb(null, safeName);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (req, file, cb) => {
         const ok = /image\/(png|jpe?g|webp|gif)/i.test(file.mimetype || '');
         if (!ok) return cb(new BadRequestException('Only image files are allowed') as any, false);
@@ -185,8 +166,14 @@ export class ProductsController {
   ) {
     if (!file) throw new BadRequestException('Image file is required');
 
-    // Must match how you serve uploads publicly (e.g. app.useStaticAssets(...))
-    const url = `/uploads/products/${file.filename}`;
+    // Upload to Supabase Storage; the returned URL is permanent and
+    // survives Render redeploys (legacy /uploads/ images keep working
+    // via ServeStatic — they are committed to the repo).
+    const url = await this.storageService.uploadProductImage(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
 
     return this.productsService.addImageToProduct(productId, {
       url,

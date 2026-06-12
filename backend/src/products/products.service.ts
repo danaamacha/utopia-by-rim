@@ -14,6 +14,7 @@ import { ProductImage } from '../media/product-image.entity';
 
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { StorageService } from '../storage/storage.service';
 
 @Injectable()
 export class ProductsService {
@@ -24,6 +25,7 @@ export class ProductsService {
     private readonly categoryRepo: Repository<Category>,
     @InjectRepository(ProductImage)
     private readonly productImageRepo: Repository<ProductImage>,
+    private readonly storageService: StorageService,
   ) {}
 
   /** ✅ Normalize slug safely (decode + trim + lowercase) */
@@ -397,11 +399,15 @@ export class ProductsService {
     for (const img of (p as any).images ?? []) {
       const url: string = img.url;
       if (url?.startsWith('/uploads/')) {
+        // legacy local file
         const rel = url.replace(/^\//, '');
         const full = path.join(process.cwd(), rel);
         try {
           if (fs.existsSync(full)) fs.unlinkSync(full);
         } catch {}
+      } else if (url) {
+        // Supabase-hosted file (best-effort, never throws)
+        await this.storageService.deleteByPublicUrl(url);
       }
     }
 
