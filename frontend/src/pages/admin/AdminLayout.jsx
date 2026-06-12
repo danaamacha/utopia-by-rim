@@ -10,6 +10,7 @@ const TABS = [
   { id: "products", label: "Products", to: "/admin/products" },
   { id: "orders", label: "Orders", to: "/admin/orders" },
   { id: "customers", label: "Customers", to: "/admin/customers" },
+  { id: "messages", label: "Messages", to: "/admin/messages" },
   { id: "pages", label: "Pages", to: "/admin/pages" },
   { id: "discounts", label: "Discount Codes", to: "/admin/discounts" },
   { id: "settings", label: "Settings", to: "/admin/settings" },

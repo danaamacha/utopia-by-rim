@@ -29,7 +29,7 @@ export class ContactController {
 
   // Admin: list messages
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('owner', 'admin')
   @Get('admin/contact')
   adminList(@Query() query: AdminContactQueryDto) {
     return this.contactService.adminList(query);
@@ -37,7 +37,7 @@ export class ContactController {
 
   // Admin: get message
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('owner', 'admin')
   @Get('admin/contact/:id')
   adminGet(@Param('id') id: string) {
     return this.contactService.adminGetById(id);
@@ -45,7 +45,7 @@ export class ContactController {
 
   // Admin: update status
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('owner', 'admin')
   @Patch('admin/contact/:id/status')
   adminUpdateStatus(
     @Param('id') id: string,

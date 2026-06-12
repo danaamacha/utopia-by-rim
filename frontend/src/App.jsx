@@ -45,6 +45,7 @@ import AdminProductEdit from "./pages/admin/AdminProductEdit";
 
 import AdminOrders from "./pages/admin/AdminOrders";
 import AdminCustomers from "./pages/admin/AdminCustomers";
+import AdminMessages from "./pages/admin/AdminMessages";
 import AdminPages from "./pages/admin/AdminPages";
 import AdminDiscounts from "./pages/admin/AdminDiscounts";
 import AdminSettings from "./pages/admin/AdminSettings";
@@ -114,6 +115,8 @@ export default function App() {
               <Route path="orders" element={<AdminOrders />} />
               {/* /admin/customers */}
               <Route path="customers" element={<AdminCustomers />} />
+              {/* /admin/messages */}
+              <Route path="messages" element={<AdminMessages />} />
               {/* /admin/pages */}
               <Route path="pages" element={<AdminPages />} />
               {/* /admin/discounts */}

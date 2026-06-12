@@ -1,17 +1,21 @@
 // src/contact/contact.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, FindOptionsWhere, Repository } from 'typeorm';
 import { ContactMessage, ContactMessageStatus } from './entities/contact-message.entity';
 import { CreateContactMessageDto } from './dto/create-contact-message.dto';
 import { AdminContactQueryDto } from './dto/admin-contact-query.dto';
 import { UpdateContactStatusDto } from './dto/update-contact-status.dto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class ContactService {
+  private readonly logger = new Logger(ContactService.name);
+
   constructor(
     @InjectRepository(ContactMessage)
     private readonly repo: Repository<ContactMessage>,
+    private readonly mailService: MailService,
   ) {}
 
   async create(dto: CreateContactMessageDto) {
@@ -20,6 +24,19 @@ export class ContactService {
       status: ContactMessageStatus.NEW,
     });
     const saved = await this.repo.save(message);
+
+    // Fire-and-forget owner notification: the message is already saved,
+    // so an SMTP failure must never fail the customer's submission.
+    this.mailService
+      .sendContactNotification({
+        name: saved.name,
+        email: saved.email,
+        message: saved.message,
+      })
+      .catch((e) =>
+        this.logger.warn(`Contact notification email failed: ${e?.message ?? e}`),
+      );
+
     return { id: saved.id, status: saved.status, createdAt: saved.createdAt };
   }
 
